@@ -1,0 +1,36 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Backend (mock API :8000)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["main:app", "--reload", "--host", "127.0.0.1", "--port", "8000"],
+      "cwd": "${workspaceFolder}/Backend",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/Backend"
+      },
+      "jinja": true
+    },
+    {
+      "name": "LLM RAG API (:8001)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["main:app", "--reload", "--host", "127.0.0.1", "--port", "8001"],
+      "cwd": "${workspaceFolder}/LLM",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/LLM",
+        "PORT": "8001"
+      },
+      "jinja": true
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Backend + LLM",
+      "configurations": ["Backend (mock API :8000)", "LLM RAG API (:8001)"]
+    }
+  ]
+}

@@ -5,4 +5,7 @@ node_modules
 __pycache__
 .pytest_cache
 Frontend/dist
-데모 계정: `demo@demo.com` / `demo123`
+LLM/test-ui/node_modules
+LLM/test-ui/dist
+*.pyc
+.DS_Store
