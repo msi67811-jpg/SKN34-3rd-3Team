@@ -1,4 +1,8 @@
 .venv
+beckend.venv
 .env
 node_modules
 __pycache__
+.pytest_cache
+Frontend/dist
+데모 계정: `demo@demo.com` / `demo123`

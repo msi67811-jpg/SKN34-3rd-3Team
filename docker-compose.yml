@@ -2,6 +2,8 @@ services:
   backend:
     build:
       context: ./Backend
+    ports:
+      - "8000:8000"
     volumes:
       - ./Backend:/app
 

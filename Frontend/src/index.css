@@ -1,0 +1,13 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  background: #f4efe6;
+  color: #1c2a22;
+}
+
+.card {
+  @apply rounded-2xl border border-sand bg-white/80 shadow-sm;
+}
