@@ -1,0 +1,4 @@
+data/processed/*
+!data/processed/.gitkeep
+evaluation/results/*
+!evaluation/results/.gitkeep

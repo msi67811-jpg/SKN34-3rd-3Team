@@ -1,0 +1,37 @@
+[
+  {
+    "case_id": "startup-support-001",
+    "user_id": 1,
+    "question": "초기 창업자를 위한 지원정책과 신청 조건을 알려줘",
+    "relevant_policy_ids": [101],
+    "should_block": false
+  },
+  {
+    "case_id": "housing-support-001",
+    "user_id": 1,
+    "question": "청년 주거이전비 지원정책을 알려줘",
+    "relevant_policy_ids": [102],
+    "should_block": false
+  },
+  {
+    "case_id": "employment-support-001",
+    "user_id": 2,
+    "question": "청년 직무경험과 근속 장려금 지원사업을 알려줘",
+    "relevant_policy_ids": [103, 104],
+    "should_block": false
+  },
+  {
+    "case_id": "out-of-scope-weather-001",
+    "user_id": 1,
+    "question": "오늘 날씨가 어때?",
+    "relevant_policy_ids": [],
+    "should_block": true
+  },
+  {
+    "case_id": "mixed-domain-001",
+    "user_id": 1,
+    "question": "나와 관련된 정책 알려줘 그리고 파이썬 append에 관해 알려줘",
+    "relevant_policy_ids": [],
+    "should_block": true
+  }
+]
