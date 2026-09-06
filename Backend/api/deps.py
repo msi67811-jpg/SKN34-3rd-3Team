@@ -24,7 +24,9 @@ def get_current_user(
     user = store.users.get(uid)
     if not user:
         raise HTTPException(status_code=401, detail="사용자를 찾을 수 없습니다.")
-    return user
+    if user.get("status") == "suspended":
+        raise HTTPException(status_code=403, detail="정지된 계정입니다.")
+    return {**user, "role": "user"}
 
 
 def get_admin(current: dict = Depends(get_current_user)) -> dict:

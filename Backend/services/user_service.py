@@ -1,6 +1,7 @@
 from fastapi import HTTPException
 
 from core import store
+from core.database import persist
 
 
 def get_me(user_id: int) -> dict:
@@ -13,6 +14,7 @@ def get_me(user_id: int) -> dict:
         "name": user["name"],
         "age": user.get("age"),
         "region": user.get("region"),
+        "phone": user.get("phone") or "",
     }
 
 
@@ -20,9 +22,10 @@ def update_me(user_id: int, payload: dict) -> None:
     user = store.users.get(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
-    for key in ("name", "age", "region"):
+    for key in ("name", "age", "region", "phone"):
         if payload.get(key) is not None:
             user[key] = payload[key]
+    persist()
 
 
 def get_business_profile(user_id: int) -> dict:
@@ -61,6 +64,7 @@ def update_business_profile(user_id: int, payload: dict) -> None:
         if payload.get(src) is not None:
             profile[dest] = payload[src]
     store.business_profiles[user_id] = profile
+    persist()
 
 
 def onboarding_complete(user_id: int) -> bool:

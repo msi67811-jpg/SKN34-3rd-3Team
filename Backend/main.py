@@ -1,8 +1,13 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api import admin, auth, calendar, chat, expenses, policies, tax, users
+from api import admin, auth, calendar, chat, expenses, notifications, policies, tax, users
 from core.config import APP_DESCRIPTION, APP_NAME, APP_VERSION, OPENAPI_TAGS
+from core.database import db_path, init_db
+from core.llm_client import llm_status
+from core.postgres import postgres_status
+
+storage_mode = init_db()
 
 app = FastAPI(
     title=APP_NAME,
@@ -27,12 +32,22 @@ app.include_router(tax.router)
 app.include_router(expenses.router)
 app.include_router(policies.router)
 app.include_router(admin.router)
+app.include_router(notifications.router)
 
 
 @app.get("/health", tags=["상태"], summary="서버 상태 확인")
 def health():
-    """서버가 켜져 있는지 확인합니다. 저장은 메모리, LLM은 목업입니다."""
-    return {"status": "ok", "storage": "memory", "llm": "mocked"}
+    llm = llm_status()
+    postgres = postgres_status()
+    return {
+        "status": "ok",
+        "storage": storage_mode,
+        "dbPath": db_path(),
+        "postgres": "connected" if postgres["reachable"] else "unreachable",
+        "pgvector": "ready" if postgres.get("pgvector") else "missing",
+        "llm": "connected" if llm["reachable"] else "unreachable",
+        "ragReady": llm["ragReady"],
+    }
 
 
 if __name__ == "__main__":

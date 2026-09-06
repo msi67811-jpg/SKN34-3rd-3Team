@@ -11,6 +11,9 @@ class ChatMessageResponse(BaseModel):
     model_config = ConfigDict(title="챗봇 답변")
     messageId: int = Field(description="메시지 ID")
     answer: str = Field(description="답변 텍스트")
+    grounded: bool = Field(default=False, description="RAG 근거가 있었는지")
+    llmUsed: bool = Field(default=False, description="LLM 서비스 호출 여부")
+    needsConfirmation: bool = Field(default=False, description="근거 부족으로 확인이 필요한지")
 
 
 class SourceItem(BaseModel):

@@ -7,5 +7,7 @@ __pycache__
 Frontend/dist
 LLM/test-ui/node_modules
 LLM/test-ui/dist
+Backend/data/*.db
 *.pyc
 .DS_Store
+.env.example

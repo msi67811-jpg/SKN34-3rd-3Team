@@ -70,7 +70,7 @@ def extract_all_articles(law_json, law_name):
         content = article.get("조문내용", "") or ""
 
         if not content.strip():
-            continue  # 내용이 아예 비어있는 조문(삭제된 조문 등)은 건너뜀
+            continue 
 
         rows.append({
             "title": f"{law_name} 제{article.get('조문번호','?')}조 {title}".strip(),

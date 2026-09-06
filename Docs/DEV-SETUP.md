@@ -5,8 +5,8 @@
 - 백엔드·프론트 목업 (기존)
 - `feature/db-schema` → `DB/schema.sql`
 - `feature/data-collection` → `DB/scripts/collect_tax_law.py`
-- `feature/LLM` → `LLM/` RAG 서비스
-- LLM 테스트 UI → `LLM/test-ui/` (Frontend와 분리)
+- `feature/LLM` → `LLM/` RAG 서비스 + Frontend 스택(React 19 / Vite 7 / Tailwind 4)
+- Frontend에 Backend 목업 화면 + 메뉴 **LLM Lab** 통합 (`LLM/test-ui/`는 선택용 백업)
 
 ## 포트
 
@@ -54,19 +54,29 @@ uv run uvicorn main:app --host 127.0.0.1 --port 8001
 
 Cursor: **LLM RAG API (:8001)** 또는 compound **Backend + LLM**
 
-## 3. Frontend (서비스 화면)
+## 3. Frontend (서비스 + LLM Lab)
 
-Google Drive에서 `npm install`이 깨지면 `C:\Users\...\skn-frontend`처럼 로컬 디스크로 복사 후 설치.
+`feature/LLM` UI 스택 위에 로그인·캘린더·상담·정책·세무·지출 목업을 연결했습니다.
+메뉴 **LLM Lab**은 실제 RAG(`8001`)를 호출합니다.
+
+Google Drive에서 `npm install`이 깨지면 로컬 디스크로 동기화 후 실행:
 
 ```powershell
-cd Frontend
+robocopy Frontend C:\Users\playdata2\skn-frontend /E /XD node_modules dist
+cd C:\Users\playdata2\skn-frontend
+# 예전 Tailwind3 파일이 남아 있으면 삭제
+Remove-Item postcss.config.js, tailwind.config.js -ErrorAction SilentlyContinue
 npm install
 npm run dev
 ```
 
-- http://127.0.0.1:5173 → Backend `/api` 프록시
+- http://127.0.0.1:5173 → Backend `/api` 프록시 (8000)
+- LLM Lab → `VITE_LLM_API_URL` (기본 `http://127.0.0.1:8001`)
+- 데모: `demo@demo.com` / `demo123`
+- 회원·채팅·지출은 `Backend/data/app.db` (SQLite)에 저장
+- 작업 설명: `Docs/IMPLEMENTATION.md`
 
-## 4. LLM 테스트 UI (선택)
+## 4. LLM 테스트 UI (선택 백업)
 
 ```powershell
 cd LLM\test-ui
@@ -79,6 +89,10 @@ npm run dev -- --port 5174
 
 - 스키마: `DB/schema.sql` (Postgres + pgvector)
 - 수집: `DB/scripts/collect_tax_law.py`  
+  - K-Startup: `DB/scripts/collect_kstartup.py`  
+  - 기업마당: `DB/scripts/collect_bizinfo.py`  
+  - 캘린더 적재: `DB/scripts/generate_calendar_events.py`  
+  - 공고-캘린더 연결: `DB/scripts/link_policy_calendar.sql`  
   - 필요 패키지: `requests`, `psycopg2-binary`, `python-dotenv`  
   - `LAW_API_KEY`, DB 접속 정보는 `.env`  
   - Postgres가 떠 있고 `schema.sql` 적용된 뒤에 실행
@@ -96,9 +110,9 @@ DB 컨테이너는 아직 compose에 없을 수 있음. 스키마만 먼저 두�
 
 ```
 Backend/     # 목업 REST (메모리)
-Frontend/    # 서비스 목업 UI
+Frontend/    # LLM 스택 UI + Backend 목업 연결 + LLM Lab
 LLM/         # RAG 서비스
-LLM/test-ui/ # LLM 단독 테스트 화면
+LLM/test-ui/ # LLM 단독 테스트(백업)
 DB/          # schema.sql + collect script
 Docs/        # 가이드
 ```

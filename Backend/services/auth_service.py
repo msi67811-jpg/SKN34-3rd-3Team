@@ -1,6 +1,7 @@
 from fastapi import HTTPException
 
 from core import store
+from core.database import persist
 from core.security import create_token, hash_password, verify_password
 
 
@@ -14,10 +15,13 @@ def signup(email: str, password: str, name: str) -> int:
         "name": name,
         "age": None,
         "region": None,
+        "phone": "",
+        "status": "active",
         "created_at": __import__("datetime").datetime.now(),
     }
     store.users[user["id"]] = user
     store.users_by_email[email] = user["id"]
+    persist()
     return user["id"]
 
 
@@ -28,6 +32,8 @@ def login(email: str, password: str) -> dict:
     user = store.users[uid]
     if not verify_password(password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="이메일 또는 비밀번호가 올바르지 않습니다.")
+    if user.get("status") == "suspended":
+        raise HTTPException(status_code=403, detail="정지된 계정입니다. 관리자에게 문의하세요.")
     return {
         "accessToken": create_token(user["id"], "user"),
         "userId": user["id"],

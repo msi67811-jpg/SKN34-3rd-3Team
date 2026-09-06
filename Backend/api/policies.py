@@ -21,8 +21,7 @@ def search(
     current: dict = Depends(get_current_user),
 ):
     """키워드·지역·업종으로 샘플 정책을 검색합니다."""
-    _ = current
-    return {"policies": policy_service.search(keyword, region, industry)}
+    return {"policies": policy_service.search(keyword, region, industry, current["id"])}
 
 
 @router.get(
@@ -86,6 +85,6 @@ def summary(
     announcement_id: int = Path(description="공고 ID"),
     current: dict = Depends(get_current_user),
 ):
-    """저장된 샘플 요약입니다. 실제 LLM 요약은 아직 없습니다."""
+    """저장된 요약이 있으면 쓰고, LLM 서비스가 있으면 다시 요약합니다."""
     _ = current
     return policy_service.announcement_summary(announcement_id)

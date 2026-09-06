@@ -1,11 +1,38 @@
 services:
+  db:
+    image: pgvector/pgvector:pg16
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin1234
+      POSTGRES_DB: startup_platform
+    volumes:
+      - pgdata_startup:/var/lib/postgresql/data
+      # Google Drive 등에서 파일 마운트가 폴더로 잡히면 DB_INIT_DIR를 로컬 경로로 두세요.
+      - ${DB_INIT_DIR:-./DB}/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ${DB_INIT_DIR:-./DB}/app_extras.sql:/docker-entrypoint-initdb.d/02-app-extras.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d startup_platform"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
   backend:
     build:
       context: ./Backend
     ports:
       - "8000:8000"
+    environment:
+      LLM_API_URL: http://llm:8001
+      DATABASE_URL: postgresql://admin:admin1234@db:5432/startup_platform
     volumes:
       - ./Backend:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      llm:
+        condition: service_started
 
   llm:
     build:
@@ -14,5 +41,12 @@ services:
       - "8001:8001"
     environment:
       PORT: "8001"
+      DATABASE_URL: postgresql://admin:admin1234@db:5432/startup_platform
     volumes:
       - ./LLM:/app
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata_startup:

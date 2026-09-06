@@ -3,6 +3,8 @@ from datetime import date, datetime
 from fastapi import HTTPException
 
 from core import store
+from core.database import persist
+from core.llm_client import explain_tax_reduction
 
 
 def diagnose(conditions: dict) -> dict:
@@ -46,6 +48,7 @@ def update_tax_info(user_id: int, tax_info: dict) -> None:
         "details": tax_info.get("details", ""),
         "updated_at": datetime.now(),
     }
+    persist()
 
 
 EXCLUDED_INDUSTRIES = {"유흥", "부동산임대", "사행성"}
@@ -84,17 +87,27 @@ def check_tax_reduction(user_id: int) -> dict:
     else:
         reasons.append(f"업종 '{industry}' — 배제 업종으로 보이지 않음")
 
+    explained = explain_tax_reduction(eligible, reasons)
+    legal_basis = (
+        explained["legalBasis"]
+        if explained and explained.get("legalBasis")
+        else "조세특례제한법 청년창업 중소기업 세액감면 요건을 단순화한 Rule 판정입니다. 최종 판단이 아닙니다."
+    )
+    llm_used = bool(explained and explained.get("llmUsed"))
     result = {
         "eligible": eligible,
         "reasons": reasons,
-        "legalBasis": "조세특례제한법 청년창업 중소기업 세액감면 요건을 단순화한 Rule 판정(샘플). 최종 판단이 아닙니다.",
+        "legalBasis": legal_basis,
         "judged_at": datetime.now(),
+        "llmUsed": llm_used,
     }
     store.tax_reduction_results[user_id] = result
+    persist()
     return {
         "eligible": eligible,
         "reasons": reasons,
-        "legalBasis": result["legalBasis"],
+        "legalBasis": legal_basis,
+        "llmUsed": llm_used,
     }
 
 
@@ -106,4 +119,5 @@ def latest_tax_reduction(user_id: int) -> dict:
         "eligible": result["eligible"],
         "reasons": result["reasons"],
         "legalBasis": result["legalBasis"],
+        "llmUsed": bool(result.get("llmUsed")),
     }

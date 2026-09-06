@@ -9,7 +9,9 @@ from src.core.config import Settings
 from src.data.contracts import DocumentCatalogEntry
 from src.data.document_catalog import SOURCE_PDF_DIR
 from src.features.indexing import prepare_document_chunks
+from src.vectorstores.base import VectorSearch
 from src.vectorstores.in_memory import InMemoryVectorSearch
+from src.vectorstores.pgvector import PgVectorSearch
 
 
 INDEX_CACHE_VERSION = 1
@@ -32,7 +34,7 @@ class IndexManifest:
 class CachedVectorIndex:
     """로드 또는 생성된 Vector 인덱스와 캐시 사용 결과."""
 
-    vector_search: InMemoryVectorSearch
+    vector_search: VectorSearch
     document_count: int
     chunk_count: int
     loaded_from_cache: bool
@@ -91,7 +93,12 @@ def load_or_build_document_index(
                 pass
             else:
                 return CachedVectorIndex(
-                    vector_search=cached_vector_search,
+                    vector_search=_prefer_pgvector(
+                        cached_vector_search,
+                        embedding=embedding,
+                        settings=settings,
+                        chunks=None,
+                    ),
                     document_count=len(catalog),
                     chunk_count=stored_manifest.chunk_count,
                     loaded_from_cache=True,
@@ -122,11 +129,37 @@ def load_or_build_document_index(
         manifest_path,
     )
     return CachedVectorIndex(
-        vector_search=new_vector_search,
+        vector_search=_prefer_pgvector(
+            new_vector_search,
+            embedding=embedding,
+            settings=settings,
+            chunks=rag_chunks,
+        ),
         document_count=len(catalog),
         chunk_count=len(rag_chunks),
         loaded_from_cache=False,
     )
+
+
+def _prefer_pgvector(
+    fallback: InMemoryVectorSearch,
+    *,
+    embedding: Embeddings,
+    settings: Settings,
+    chunks: list | None,
+) -> VectorSearch:
+    """Postgres가 살아 있으면 pgvector에 적재하고 그 구현체를 쓴다."""
+    if not settings.pgvector_enabled:
+        return fallback
+    try:
+        pg_search = PgVectorSearch(embedding, settings.database_url)
+        if chunks:
+            pg_search.add_chunks(chunks)
+        elif pg_search.count() == 0:
+            return fallback
+        return pg_search
+    except Exception:
+        return fallback
 
 
 def _cache_is_valid(

@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from src.core.config import get_settings
 from src.rag.runtime import RagRuntime
+from src.serving.ai_routes import router as ai_router
 from src.serving.rag_routes import router as rag_router
 from src.serving.schemas import ComponentConfiguration, HealthResponse
 
@@ -37,6 +38,7 @@ def create_app(runtime: RagRuntime | None = None) -> FastAPI:
     )
     fastapi_app.state.rag_runtime = runtime or RagRuntime()
     fastapi_app.include_router(rag_router)
+    fastapi_app.include_router(ai_router)
 
     @fastapi_app.get(
         "/health",
@@ -60,7 +62,11 @@ def create_app(runtime: RagRuntime | None = None) -> FastAPI:
                     if settings_config.embedding_configured
                     else "not_configured"
                 ),
-                data_source="in_memory",
+                data_source=(
+                    "pgvector"
+                    if settings_config.pgvector_enabled
+                    else "in_memory"
+                ),
             ),
         )
 

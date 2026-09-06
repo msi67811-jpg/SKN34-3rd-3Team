@@ -3,6 +3,8 @@ from datetime import datetime
 from fastapi import HTTPException
 
 from core import store
+from core.database import persist
+from core.llm_client import rag_answer
 
 SUGGESTED = {
     "tax": [
@@ -28,10 +30,10 @@ SUGGESTED = {
 }
 
 MOCK_ANSWERS = {
-    "tax": "세금 일정과 신고 유형은 사업자 등록 유형에 따라 달라집니다. 현재는 LLM 연동 전이라 샘플 안내입니다. 실제 신고 전에는 국세청 자료 또는 세무 전문가 확인이 필요합니다.",
-    "expense": "사업과 직접 관련된 지출은 증빙이 있으면 경비로 볼 여지가 있습니다. 현재는 OCR/LLM 연동 전 샘플 답변이며, 최종 인정 여부는 세무서·세무사 확인이 필요합니다.",
-    "saving": "장부 구분, 사업용 계좌, 감면 요건 확인이 기본입니다. 본 답변은 목업이며 세무 자문을 대체하지 않습니다.",
-    "policy": "사용자 나이·지역·업력을 기준으로 샘플 정책을 안내합니다. 실제 자격은 공고문 원문을 확인해야 합니다.",
+    "tax": "세금 일정과 신고 유형은 사업자 등록 유형에 따라 달라집니다. LLM 서비스에 연결되지 않아 샘플 안내입니다. 실제 신고 전에는 국세청 자료 또는 세무 전문가 확인이 필요합니다.",
+    "expense": "사업과 직접 관련된 지출은 증빙이 있으면 경비로 볼 여지가 있습니다. 최종 인정 여부는 세무서·세무사 확인이 필요합니다.",
+    "saving": "장부 구분, 사업용 계좌, 감면 요건 확인이 기본입니다. 본 답변은 세무 자문을 대체하지 않습니다.",
+    "policy": "사용자 나이·지역·업력을 기준으로 안내합니다. 실제 자격은 공고문 원문을 확인해야 합니다.",
 }
 
 MOCK_SOURCES = [
@@ -52,20 +54,61 @@ def suggested_questions(category: str) -> list[str]:
     return SUGGESTED.get(category, SUGGESTED["tax"])
 
 
-def send_message(user_id: int, category: str, question: str) -> dict:
-    if category not in SUGGESTED:
-        raise HTTPException(status_code=400, detail="지원하지 않는 카테고리입니다.")
-    mid = store.next_id("chat")
-    answer = MOCK_ANSWERS[category]
+def _profile_prefix(user_id: int) -> str:
     user = store.users.get(user_id, {})
     profile = store.business_profiles.get(user_id, {})
     context = f"{user.get('name') or '회원'}님"
-    if user.get("region"):
-        context += f"({user['region']}"
-        if profile.get("industry"):
-            context += f", {profile['industry']}"
-        context += ")"
-    full_answer = f"{context} 질문: “{question}”\n\n{answer}"
+    extras = [x for x in (user.get("region"), profile.get("industry")) if x]
+    if extras:
+        context += f"({', '.join(extras)})"
+    return context
+
+
+def _sources_from_rag(rag: dict) -> list[dict]:
+    sources = []
+    for item in rag.get("sources") or []:
+        sources.append(
+            {
+                "title": item.get("title") or item.get("source") or "RAG 문서",
+                "url": item.get("source") or "",
+                "excerpt": item.get("excerpt") or "",
+            }
+        )
+    return sources
+
+
+def send_message(user_id: int, category: str, question: str) -> dict:
+    if category not in SUGGESTED:
+        raise HTTPException(status_code=400, detail="지원하지 않는 카테고리입니다.")
+    prefix = _profile_prefix(user_id)
+    rag_question = f"[{category}] {prefix} 질문: {question}"
+    rag = rag_answer(rag_question)
+    llm_used = False
+    grounded = False
+    needs_confirmation = True
+    if rag and rag.get("answer"):
+        full_answer = rag["answer"]
+        sources = _sources_from_rag(rag)
+        grounded = bool(rag.get("grounded") and sources)
+        llm_used = True
+        if rag.get("guardrail_reason") == "insufficient_evidence" or not grounded:
+            needs_confirmation = True
+            if not full_answer.startswith("확인이 필요합니다"):
+                full_answer = "확인이 필요합니다. " + full_answer
+        else:
+            needs_confirmation = False
+        if rag.get("guardrail_reason") == "out_of_scope":
+            full_answer = full_answer or "그 질문에는 이 서비스에서 답변할 수 없습니다."
+            sources = []
+            needs_confirmation = True
+    else:
+        full_answer = (
+            f"{prefix} 질문: “{question}”\n\n{MOCK_ANSWERS[category]}\n\n"
+            "※ 근거 문서를 확인하지 못한 참고 안내입니다. 국세청·공고 원문 또는 전문가 확인이 필요합니다."
+        )
+        sources = []
+
+    mid = store.next_id("chat")
     store.chat_messages[mid] = {
         "id": mid,
         "user_id": user_id,
@@ -74,8 +117,15 @@ def send_message(user_id: int, category: str, question: str) -> dict:
         "answer": full_answer,
         "created_at": datetime.now(),
     }
-    store.answer_sources[mid] = list(MOCK_SOURCES)
-    return {"messageId": mid, "answer": full_answer}
+    store.answer_sources[mid] = sources
+    persist()
+    return {
+        "messageId": mid,
+        "answer": full_answer,
+        "grounded": grounded,
+        "llmUsed": llm_used,
+        "needsConfirmation": needs_confirmation,
+    }
 
 
 def get_sources(message_id: int) -> list[dict]:
@@ -89,3 +139,18 @@ def list_messages(user_id: int, category: str | None = None) -> list[dict]:
     if category:
         rows = [m for m in rows if m["category"] == category]
     return sorted(rows, key=lambda m: m["created_at"])
+
+
+def clear_messages(user_id: int, category: str | None = None) -> int:
+    removed = []
+    for mid, row in list(store.chat_messages.items()):
+        if row["user_id"] != user_id:
+            continue
+        if category and row["category"] != category:
+            continue
+        removed.append(mid)
+        del store.chat_messages[mid]
+        store.answer_sources.pop(mid, None)
+    if removed:
+        persist()
+    return len(removed)

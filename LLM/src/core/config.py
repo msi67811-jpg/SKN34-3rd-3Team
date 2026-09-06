@@ -58,6 +58,7 @@ class Settings(BaseSettings):
     )
     out_of_scope_answer: str = "그 질문에는 답변할 수 없습니다"
     vector_index_cache_path: Path = Path("data/processed/rag_vector_index.json")
+    database_url: str = ""
 
     langsmith_tracing: bool = False
     langsmith_endpoint: str = "https://api.smith.langchain.com"
@@ -105,6 +106,12 @@ class Settings(BaseSettings):
             and _has_real_value(self.langsmith_project)
             and _has_real_value(self.langsmith_api_key)
         )
+
+    @property
+    @property
+    def pgvector_enabled(self) -> bool:
+        """DATABASE_URL이 실제 Postgres 접속 문자열인지 반환한다."""
+        return _has_real_value(self.database_url) and "postgres" in self.database_url
 
     @property
     def resolved_vector_index_cache_path(self) -> Path:

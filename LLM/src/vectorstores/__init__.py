@@ -1,4 +1,4 @@
 from src.vectorstores.in_memory import InMemoryVectorSearch
+from src.vectorstores.pgvector import PgVectorSearch
 
-__all__ = ["InMemoryVectorSearch"]
-"""In-memory와 향후 pgvector 검색 구현체 패키지."""
+__all__ = ["InMemoryVectorSearch", "PgVectorSearch"]

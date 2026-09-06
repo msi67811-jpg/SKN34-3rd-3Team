@@ -10,6 +10,7 @@ class UserMeResponse(BaseModel):
     name: str = Field(description="이름")
     age: int | None = Field(default=None, description="나이")
     region: str | None = Field(default=None, description="거주 지역")
+    phone: str | None = Field(default=None, description="휴대폰 번호")
 
 
 class UserMeUpdate(BaseModel):
@@ -17,6 +18,7 @@ class UserMeUpdate(BaseModel):
     name: str | None = Field(default=None, description="이름")
     age: int | None = Field(default=None, description="나이")
     region: str | None = Field(default=None, description="거주 지역")
+    phone: str | None = Field(default=None, description="휴대폰 번호")
 
 
 class BusinessProfileResponse(BaseModel):

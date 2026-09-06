@@ -26,4 +26,5 @@ class TaxReductionResponse(BaseModel):
     model_config = ConfigDict(title="세액감면 판정 결과")
     eligible: bool = Field(description="요건 충족 여부")
     reasons: list[str] = Field(description="판정 사유")
-    legalBasis: str = Field(description="근거 안내 (샘플)")
+    legalBasis: str = Field(description="근거 안내")
+    llmUsed: bool = Field(default=False, description="LLM 설명 생성 여부")

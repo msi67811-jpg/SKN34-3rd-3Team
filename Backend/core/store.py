@@ -30,6 +30,7 @@ policies: dict[int, dict] = {}
 announcements: dict[int, dict] = {}
 announcement_summaries: dict[int, dict] = {}
 calendar_events: dict[int, dict] = {}
+notifications: dict[int, dict] = {}
 
 
 def _user(email: str, password: str, name: str, age: int, region: str) -> dict:
@@ -41,6 +42,8 @@ def _user(email: str, password: str, name: str, age: int, region: str) -> dict:
         "name": name,
         "age": age,
         "region": region,
+        "phone": "",
+        "status": "active",
         "created_at": datetime.now(),
     }
     users[uid] = row

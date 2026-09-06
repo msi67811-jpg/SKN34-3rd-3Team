@@ -1,7 +1,7 @@
 # 백엔드·프론트 구현 설명
 
-> DB와 LLM 없이, 설계 문서(`API_SPEC`, `ERD`, `FUNCTIONAL_SPEC`)를 기준으로 만든 **목업 구현**입니다.  
-> 서버를 재시작하면 메모리 데이터는 초기 샘플로 돌아갑니다.
+> 최신 상태(SQLite + LLM 연동)는 `Docs/IMPLEMENTATION.md`를 보세요.  
+> 아래는 초기에 **DB·LLM 없이** 만든 목업 설명입니다.
 
 ---
 
