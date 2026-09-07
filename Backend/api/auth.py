@@ -1,5 +1,6 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from api.deps import get_current_user
 from schemas.auth import LoginRequest, LoginResponse, SignupRequest, SignupResponse
 from services import auth_service
 
@@ -18,5 +19,5 @@ def login(body: LoginRequest):
 
 
 @router.post("/logout")
-def logout():
+def logout(_: dict = Depends(get_current_user)):
     return {}

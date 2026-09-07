@@ -36,6 +36,7 @@ export default function Layout() {
   }, []);
 
   function logout() {
+    api.logout().catch(() => {});
     localStorage.removeItem("accessToken");
     localStorage.removeItem("userName");
     localStorage.removeItem("userRole");

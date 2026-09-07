@@ -176,6 +176,16 @@ def announcement_summary(announcement_id: int) -> dict:
     if not announcement:
         raise HTTPException(status_code=404, detail="공고를 찾을 수 없습니다.")
     cached = store.announcement_summaries.get(announcement_id)
+    if cached:
+        return {
+            "target": cached["target"],
+            "benefit": cached["benefit"],
+            "period": cached["period"],
+            "documents": cached["documents"],
+            "notes": cached["notes"],
+            "source": cached["source"],
+            "llmUsed": bool(cached.get("llm_used")),
+        }
     llm = summarize_announcement(announcement.get("raw_content") or "", announcement.get("source_url"))
     if llm and llm.get("benefit"):
         summary = {

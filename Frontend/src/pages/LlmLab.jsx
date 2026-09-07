@@ -59,7 +59,7 @@ export default function LlmLabPage() {
     try {
       const [healthResult, readyResult] = await Promise.all([
         apiRequest("/health"),
-        apiRequest("/internal/rag/ready"),
+        apiRequest("/rag/ready").catch(() => apiRequest("/internal/rag/ready")),
       ]);
       setHealth(healthResult);
       setReady(readyResult);
@@ -80,7 +80,9 @@ export default function LlmLabPage() {
     setIndexing(true);
     setError("");
     try {
-      await apiRequest("/internal/rag/index", { method: "POST" });
+      await apiRequest("/rag/reindex", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) }).catch(
+        () => apiRequest("/internal/rag/index", { method: "POST" }),
+      );
       await checkStatus();
     } catch (requestError) {
       setError(`인덱스를 생성하지 못했습니다. (${requestError.message})`);

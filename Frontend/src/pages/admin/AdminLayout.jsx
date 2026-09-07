@@ -1,4 +1,5 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { api } from "../../api.js";
 
 const links = [
   ["/admin", "대시보드"],
@@ -10,6 +11,7 @@ export default function AdminLayout() {
   const navigate = useNavigate();
 
   function logout() {
+    api.logout().catch(() => {});
     localStorage.removeItem("accessToken");
     localStorage.removeItem("userName");
     localStorage.removeItem("userRole");

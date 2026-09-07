@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     app_name: str = "policy-rag-llm"
     app_env: str = "local"
     host: str = "0.0.0.0"
-    port: int = 8000
+    port: int = 8001
     reload: bool = False
     log_level: str = "INFO"
     cors_origins: str = "http://localhost:5173"
@@ -107,7 +107,6 @@ class Settings(BaseSettings):
             and _has_real_value(self.langsmith_api_key)
         )
 
-    @property
     @property
     def pgvector_enabled(self) -> bool:
         """DATABASE_URL이 실제 Postgres 접속 문자열인지 반환한다."""

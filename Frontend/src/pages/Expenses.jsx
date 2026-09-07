@@ -10,15 +10,22 @@ export default function Expenses() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [pickerKey, setPickerKey] = useState(0);
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("");
 
   async function load() {
-    const data = await api.expenses();
+    const data = await api.expenses({
+      from: fromDate || undefined,
+      to: toDate || undefined,
+      category: categoryFilter || undefined,
+    });
     setItems(data.expenses || []);
   }
 
   useEffect(() => {
     load().catch((e) => setError(e.message));
-  }, []);
+  }, [fromDate, toDate, categoryFilter]);
 
   async function uploadFile(next) {
     if (!next) return;
@@ -80,6 +87,31 @@ export default function Expenses() {
           영수증 사진을 Vision OCR로 읽고, 분류를 수정한 뒤 경비 가능성을 확인할 수 있습니다.
         </p>
       </header>
+
+      <div className="flex flex-wrap gap-2">
+        <input
+          type="date"
+          className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white"
+          value={fromDate}
+          onChange={(e) => setFromDate(e.target.value)}
+        />
+        <input
+          type="date"
+          className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white"
+          value={toDate}
+          onChange={(e) => setToDate(e.target.value)}
+        />
+        <select
+          className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white"
+          value={categoryFilter}
+          onChange={(e) => setCategoryFilter(e.target.value)}
+        >
+          <option value="">전체 분류</option>
+          {CATEGORIES.map((category) => (
+            <option key={category}>{category}</option>
+          ))}
+        </select>
+      </div>
 
       <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
         <p className="mb-1 text-xs text-white">영수증 이미지</p>

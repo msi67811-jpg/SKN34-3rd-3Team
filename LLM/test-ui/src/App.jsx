@@ -1,6 +1,6 @@
 ﻿import { useCallback, useEffect, useState } from "react";
 
-const API_URL = (import.meta.env.VITE_LLM_API_URL ?? "http://localhost:8000")
+const API_URL = (import.meta.env.VITE_LLM_API_URL ?? "http://localhost:8001")
   .replace(/\/$/, "");
 
 const LABELS = {

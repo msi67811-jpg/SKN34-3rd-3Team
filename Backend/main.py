@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api import admin, auth, calendar, chat, expenses, notifications, policies, tax, users
-from core.config import APP_DESCRIPTION, APP_NAME, APP_VERSION, OPENAPI_TAGS
+from core.config import APP_DESCRIPTION, APP_NAME, APP_VERSION, LLM_API_URL, OPENAPI_TAGS
 from core.database import db_path, init_db
 from core.llm_client import llm_status
 from core.postgres import postgres_status
@@ -47,6 +47,8 @@ def health():
         "pgvector": "ready" if postgres.get("pgvector") else "missing",
         "llm": "connected" if llm["reachable"] else "unreachable",
         "ragReady": llm["ragReady"],
+        "ports": {"backend": 8000, "llm": 8001},
+        "llmUrl": LLM_API_URL,
     }
 
 

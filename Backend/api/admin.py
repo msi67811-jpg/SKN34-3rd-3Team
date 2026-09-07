@@ -191,8 +191,9 @@ def create_announcement(body: dict, _: dict = Depends(get_admin)):
 
 
 @router.post("/rag-documents/reindex", summary="RAG 문서 재색인")
-def reindex(_: dict = Depends(get_admin)):
-    ok = ensure_index()
+def reindex(body: dict | None = None, _: dict = Depends(get_admin)):
+    document_ids = (body or {}).get("documentIds")
+    ok = ensure_index(document_ids)
     return {"status": "ready" if ok else "skipped", "llm": llm_status()}
 
 

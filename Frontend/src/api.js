@@ -40,6 +40,7 @@ export const api = {
   health: () => request("/health"),
   signup: (body) => request("/auth/signup", { method: "POST", body: JSON.stringify(body) }),
   login: (body) => request("/auth/login", { method: "POST", body: JSON.stringify(body) }),
+  logout: () => request("/auth/logout", { method: "POST", body: JSON.stringify({}) }),
   me: () => request("/users/me"),
   updateMe: (body) => request("/users/me", { method: "PUT", body: JSON.stringify(body) }),
   business: () => request("/users/me/business-profile"),
@@ -80,7 +81,7 @@ export const api = {
     return request("/expenses/receipts", { method: "POST", body: form });
   },
   receipt: (id) => request(`/expenses/receipts/${id}`),
-  expenses: () => request("/expenses"),
+  expenses: (params = {}) => request(`/expenses${query(params)}`),
   updateExpense: (id, body) =>
     request(`/expenses/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deductibility: (id) => request(`/expenses/${id}/deductibility`),

@@ -57,7 +57,7 @@ def create_receipt(
         items = llm.get("items") or []
         spent = date.fromisoformat(str(llm.get("date") or date.today())[:10])
         category = _classify(vendor, amount, llm.get("category"))
-        source = llm.get("source") or "llm"
+        source = llm.get("source") or "heuristic"
     else:
         vendor = "샘플문구점" if "office" in filename.lower() else "강남카페"
         amount = 18000
@@ -117,10 +117,19 @@ def get_extraction(receipt_id: int, user_id: int) -> dict:
     }
 
 
-def list_expenses(user_id: int, category: str | None = None) -> list[dict]:
+def list_expenses(
+    user_id: int,
+    category: str | None = None,
+    from_date: date | None = None,
+    to_date: date | None = None,
+) -> list[dict]:
     rows = [e for e in store.expenses.values() if e["user_id"] == user_id]
     if category:
         rows = [e for e in rows if e["category"] == category]
+    if from_date:
+        rows = [e for e in rows if e["date"] >= from_date]
+    if to_date:
+        rows = [e for e in rows if e["date"] <= to_date]
     return [
         {
             "expenseId": e["id"],
@@ -153,13 +162,22 @@ def deductibility(expense_id: int, user_id: int) -> dict:
         raise HTTPException(status_code=404, detail="지출을 찾을 수 없습니다.")
     extraction = store.receipt_extractions.get(expense["receipt_id"]) or {}
     vendor = extraction.get("vendor") or "상호 미상"
-    rag = explain_expense(expense["category"], vendor, expense["amount"])
+    rag = explain_expense(
+        expense["category"],
+        vendor,
+        expense["amount"],
+        items=list(extraction.get("items") or []),
+    )
     basis = expense["deductible_basis"]
     llm_used = False
     sources: list[str] = []
-    if rag and rag.get("answer"):
-        basis = rag["answer"]
+    if rag and (rag.get("answer") or rag.get("basis")):
+        basis = rag.get("answer") or rag.get("basis")
         llm_used = True
+        if rag.get("deductible") is not None:
+            expense["deductible"] = bool(rag["deductible"])
+        if rag.get("confidence") is not None:
+            expense["deductible_confidence"] = float(rag["confidence"])
         sources = [
             item.get("title") or item.get("source") or "세법 자료"
             for item in (rag.get("sources") or [])

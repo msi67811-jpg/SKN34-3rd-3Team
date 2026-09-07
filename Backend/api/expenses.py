@@ -1,5 +1,7 @@
 import base64
 
+from datetime import date
+
 from fastapi import APIRouter, Depends, File, HTTPException, Path, Query, UploadFile
 
 from api.deps import get_current_user
@@ -51,9 +53,18 @@ def receipt_detail(
 @router.get("", response_model=ExpenseListResponse, summary="지출 내역 조회")
 def expense_list(
     category: str | None = Query(default=None, description="지출 카테고리 필터(선택)"),
+    from_date: date | None = Query(default=None, alias="from", description="시작일"),
+    to_date: date | None = Query(default=None, alias="to", description="종료일"),
     current: dict = Depends(get_current_user),
 ):
-    return {"expenses": expense_service.list_expenses(current["id"], category)}
+    return {
+        "expenses": expense_service.list_expenses(
+            current["id"],
+            category,
+            from_date=from_date,
+            to_date=to_date,
+        )
+    }
 
 
 @router.patch("/{expense_id}", response_model=DeductibilityResponse, summary="지출 분류 수정")

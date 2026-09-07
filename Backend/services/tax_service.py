@@ -87,7 +87,17 @@ def check_tax_reduction(user_id: int) -> dict:
     else:
         reasons.append(f"업종 '{industry}' — 배제 업종으로 보이지 않음")
 
-    explained = explain_tax_reduction(eligible, reasons)
+    explained = explain_tax_reduction(
+        eligible,
+        reasons,
+        conditions={
+            "age": user.get("age"),
+            "region": user.get("region"),
+            "industry": profile.get("industry"),
+            "businessRegisteredAt": str(profile.get("business_registered_at") or ""),
+            "foundedAt": str(profile.get("founded_at") or ""),
+        },
+    )
     legal_basis = (
         explained["legalBasis"]
         if explained and explained.get("legalBasis")

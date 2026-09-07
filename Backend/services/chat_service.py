@@ -81,8 +81,7 @@ def send_message(user_id: int, category: str, question: str) -> dict:
     if category not in SUGGESTED:
         raise HTTPException(status_code=400, detail="지원하지 않는 카테고리입니다.")
     prefix = _profile_prefix(user_id)
-    rag_question = f"[{category}] {prefix} 질문: {question}"
-    rag = rag_answer(rag_question)
+    rag = rag_answer(f"{prefix} 질문: {question}", category=category)
     llm_used = False
     grounded = False
     needs_confirmation = True
