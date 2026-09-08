@@ -19,8 +19,8 @@ Docker Compose 기반의 컨테이너형 서비스로 구성한다.
 * **Dependencies:** `LLM/pyproject.toml` 기준으로 관리
 
 ## Database
-* **RDBMS:** TBD
-* **Vector Store:** TBD
+* **RDBMS:** PostgreSQL
+* **Vector Store:** pgvector (PostgreSQL extension)
 * 관계형 데이터와 벡터 데이터 통합 관리
 
 ## Frontend

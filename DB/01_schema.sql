@@ -59,7 +59,7 @@ CREATE TABLE policies (
     id               SERIAL PRIMARY KEY,
     admin_id         INT REFERENCES admin_users(id),
     title            VARCHAR(255) NOT NULL,
-    region           VARCHAR(100),
+    region           VARCHAR(2000),
     industry         VARCHAR(100),
     target           TEXT,
     benefit          TEXT,
@@ -164,10 +164,13 @@ CREATE TABLE tax_documents (
 
 CREATE TABLE rag_documents (
     id                SERIAL PRIMARY KEY,
-    source_type       VARCHAR(50), 
+    source_type       VARCHAR(50),
     source_id         INT,
+    chunk_id          VARCHAR(100) UNIQUE,
+    policy_id         INT REFERENCES policies(id),
+    content           TEXT,
     embedding_status  VARCHAR(50),
-    embedding         VECTOR(1536),  -- LLM 파트 임베딩 모델 확정 후 차원 수 확인 일단임의로 1536 지정
+    embedding         VECTOR(1536),
     updated_at        TIMESTAMP DEFAULT now()
 );
 
@@ -179,3 +182,5 @@ CREATE TABLE rag_documents (
 -- 5. 일부 컬럼에 NOT NULL제약 추가
 -- 6. 영수증 상태값 디폴트 설정 (receipts.status DEFAULT 'pending')
 -- 7. tax_documents에 law_name 컬럼 추가 (법령 종류 구분용, 예: '조세특례제한법', '조세특례제한법 시행령')
+-- 8. policies 테이블의 지역 코드 담는 region 컬럼 크기 수정 (100에서 2000으로)
+-- 9. rag_documents 컬럼에 chunk_id, policy_id, content 컬럼 추가

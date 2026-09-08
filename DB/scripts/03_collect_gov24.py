@@ -13,11 +13,11 @@ load_dotenv()
 API_KEY = os.getenv("GOV24_API_KEY")
 
 DB_CONFIG = {
-    "host": "localhost",
-    "port": 5432,
-    "dbname": "startup_platform",
-    "user": "admin",
-    "password": "admin1234",
+    "host": os.getenv("DB_HOST", "localhost"),
+    "port": os.getenv("DB_PORT", "5432"),
+    "dbname": os.getenv("POSTGRES_DB"),
+    "user": os.getenv("POSTGRES_USER"),
+    "password": os.getenv("POSTGRES_PASSWORD"),
 }
 
 BASE_URL = "https://api.odcloud.kr/api/gov24/v3/serviceList"

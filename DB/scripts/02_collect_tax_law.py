@@ -1,11 +1,6 @@
 # =========================================================
 # 국가법령정보센터 API로 법령 "전체 조문"을 수집 + DB 적재
-#
-# ✏️ 변경사항: 기존엔 키워드(청년/창업 등)로 걸러서 일부만 저장했지만,
-#    - 데이터 양이 부담될 정도로 크지 않고
-#    - 미리 거르면 관련 조문을 놓칠 위험이 있고
-#    - 실제 관련성 판단은 나중에 LLM/RAG 검색 시점에 하는 게 더 안전해서
-#    이번 버전은 "전체 조문을 다 저장"하는 방식으로 바꿨습니다.
+# 
 # =========================================================
 
 import os
@@ -19,14 +14,13 @@ load_dotenv()
 OC = os.getenv("LAW_API_KEY")
 
 DB_CONFIG = {
-    "host": "localhost",
-    "port": 5432,
-    "dbname": "startup_platform",
-    "user": "admin",
-    "password": "admin1234",
+    "host": os.getenv("DB_HOST", "localhost"),
+    "port": os.getenv("DB_PORT", "5432"),
+    "dbname": os.getenv("POSTGRES_DB"),
+    "user": os.getenv("POSTGRES_USER"),
+    "password": os.getenv("POSTGRES_PASSWORD"),
 }
 
-# 여기에 수집하고 싶은 법령을 계속 추가
 LAWS_TO_COLLECT = [
     {"name": "조세특례제한법", "mst": "280409"},
     {"name": "조세특례제한법 시행령", "mst": "287181"},
@@ -49,6 +43,7 @@ LAWS_TO_COLLECT = [
     {"name": "관세법 시행규칙", "mst": "288525"},
 ]
 
+
 def fetch_law_body(mst):
     url = "http://www.law.go.kr/DRF/lawService.do"
     params = {"OC": OC, "target": "law", "MST": mst, "type": "JSON"}
@@ -67,7 +62,20 @@ def extract_all_articles(law_json, law_name):
     rows = []
     for article in articles:
         title = article.get("조문제목", "") or ""
-        content = article.get("조문내용", "") or ""
+        base_content = (article.get("조문내용", "") or "").strip()
+
+        hang_list = article.get("항")
+        hang_texts = []
+        if isinstance(hang_list, list):
+            for h in hang_list:
+                if isinstance(h, dict) and h.get("항내용"):
+                    hang_texts.append(h["항내용"])
+        elif isinstance(hang_list, dict) and hang_list.get("항내용"):
+            hang_texts.append(hang_list["항내용"])
+
+        content = base_content
+        if hang_texts:
+            content = (base_content + "\n" + "\n".join(hang_texts)).strip()
 
         if not content.strip():
             continue 

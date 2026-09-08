@@ -4,25 +4,25 @@
 
 ```mermaid
 erDiagram
-    USER ||--o| BUSINESS_PROFILE : has
-    USER ||--o{ CHAT_MESSAGE : sends
-    CHAT_MESSAGE ||--o{ ANSWER_SOURCE : cites
-    USER ||--o| TAX_INFO : manages
-    CALENDAR_EVENT ||--o{ REMINDER : triggers
-    USER ||--o{ REMINDER : sets
-    POLICY ||--o{ CALENDAR_EVENT : "due date of"
-    USER ||--o{ TAX_REDUCTION_RESULT : requests
-    USER ||--o{ RECEIPT : uploads
-    RECEIPT ||--o| RECEIPT_EXTRACTION : "extracted as"
-    RECEIPT ||--o{ EXPENSE : yields
-    ADMIN_USER ||--o{ POLICY : manages
-    POLICY ||--o{ ANNOUNCEMENT : posts
-    ANNOUNCEMENT ||--o| ANNOUNCEMENT_SUMMARY : "summarized as"
-    USER ||--o{ SAVED_POLICY : saves
-    POLICY ||--o{ SAVED_POLICY : "saved by"
-    ADMIN_USER ||--o{ TAX_DOCUMENT : uploads
+    users ||--o| business_profiles : has
+    users ||--o{ chat_messages : sends
+    chat_messages ||--o{ answer_sources : cites
+    users ||--o| tax_info : manages
+    calendar_events ||--o{ reminders : triggers
+    users ||--o{ reminders : sets
+    policies ||--o{ calendar_events : "due date of"
+    users ||--o{ tax_reduction_results : requests
+    users ||--o{ receipts : uploads
+    receipts ||--o| receipt_extractions : "extracted as"
+    receipts ||--o{ expenses : yields
+    admin_users ||--o{ policies : manages
+    policies ||--o{ announcements : posts
+    announcements ||--o| announcement_summaries : "summarized as"
+    users ||--o{ saved_policies : saves
+    policies ||--o{ saved_policies : "saved by"
+    admin_users ||--o{ tax_documents : uploads
 
-    USER {
+    users {
         int id PK
         string email
         string password_hash
@@ -32,16 +32,16 @@ erDiagram
         datetime created_at
     }
 
-    BUSINESS_PROFILE {
+    business_profiles {
         int id PK
-        int user_id FK
+        int user_id FK "UNIQUE"
         string business_type
         string industry
         date business_registered_at
         date founded_at
     }
 
-    CHAT_MESSAGE {
+    chat_messages {
         int id PK
         int user_id FK
         string category
@@ -50,7 +50,7 @@ erDiagram
         datetime created_at
     }
 
-    ANSWER_SOURCE {
+    answer_sources {
         int id PK
         int message_id FK
         string title
@@ -58,7 +58,7 @@ erDiagram
         string excerpt
     }
 
-    TAX_INFO {
+    tax_info {
         int id PK
         int user_id FK
         string tax_type
@@ -66,7 +66,7 @@ erDiagram
         datetime updated_at
     }
 
-    CALENDAR_EVENT {
+    calendar_events {
         int id PK
         string event_type "TAX / POLICY"
         string business_type "TAX 타입일 때만 사용"
@@ -76,7 +76,7 @@ erDiagram
         string description
     }
 
-    REMINDER {
+    reminders {
         int id PK
         int user_id FK
         int event_id FK
@@ -84,7 +84,7 @@ erDiagram
         datetime created_at
     }
 
-    TAX_REDUCTION_RESULT {
+    tax_reduction_results {
         int id PK
         int user_id FK
         boolean eligible
@@ -93,24 +93,24 @@ erDiagram
         datetime judged_at
     }
 
-    RECEIPT {
+    receipts {
         int id PK
         int user_id FK
         string image_url
-        string status
+        string status "DEFAULT 'pending'"
         datetime created_at
     }
 
-    RECEIPT_EXTRACTION {
+    receipt_extractions {
         int id PK
-        int receipt_id FK
+        int receipt_id FK "UNIQUE"
         date date
         string vendor
         int amount
         string items
     }
 
-    EXPENSE {
+    expenses {
         int id PK
         int receipt_id FK
         string category
@@ -121,7 +121,7 @@ erDiagram
         string deductible_basis
     }
 
-    POLICY {
+    policies {
         int id PK
         int admin_id FK
         string title
@@ -134,7 +134,7 @@ erDiagram
         datetime created_at
     }
 
-    ANNOUNCEMENT {
+    announcements {
         int id PK
         int policy_id FK
         string raw_content
@@ -144,9 +144,9 @@ erDiagram
         datetime created_at
     }
 
-    ANNOUNCEMENT_SUMMARY {
+    announcement_summaries {
         int id PK
-        int announcement_id FK
+        int announcement_id FK "UNIQUE"
         string target
         string benefit
         string period
@@ -155,14 +155,14 @@ erDiagram
         string source
     }
 
-    SAVED_POLICY {
+    saved_policies {
         int id PK
-        int user_id FK
-        int policy_id FK
+        int user_id FK "UNIQUE with policy_id"
+        int policy_id FK "UNIQUE with user_id"
         datetime saved_at
     }
 
-    ADMIN_USER {
+    admin_users {
         int id PK
         string email
         string password_hash
@@ -170,20 +170,22 @@ erDiagram
         datetime created_at
     }
 
-    TAX_DOCUMENT {
+    tax_documents {
         int id PK
         int admin_id FK
         string title
+        string law_name
         string content
         string source
         datetime created_at
     }
 
-    RAG_DOCUMENT {
+    rag_documents {
         int id PK
         string source_type
         int source_id
         string embedding_status
+        vector embedding "VECTOR(1536), 차원 임시값"
         datetime updated_at
     }
 ```
@@ -201,3 +203,7 @@ erDiagram
 - **RagDocument**: `source_type`(`tax_document`/`policy`/`announcement`) + `source_id`로 원천 문서를 가리키는 논리적 참조다. 여러 테이블을 대상으로 하므로 DB 레벨 FK 제약은 걸지 않고, 벡터DB 임베딩 상태(FS-27)만 추적한다.
 - **PolicyEligibility(FS-20)**: 별도 테이블로 저장하지 않는다. `Policy.eligibility_rule`과 `User`/`BusinessProfile` 값을 요청 시점에 비교해 계산하는 값이라 저장이 불필요하다.
 - **시스템 모니터링(FS-28)**: 관계형 DB 엔티티로 모델링하지 않는다. 로그/지표 수집은 별도 관측 도구 영역으로 본다.
+
+## 구현 노트
+
+위 다이어그램은 `DB/01_schema.sql`(PostgreSQL + pgvector)의 실제 테이블 구조에 맞춰 동기화했다. 컬럼 단위 제약(`NOT NULL`, `ON DELETE CASCADE` 등)과 `01_schema.sql` 작성 시점의 세부 결정 사유는 중복 기술하지 않고 `DB/01_schema.sql` 하단 "ERD와 다른 사항" 주석을 참조한다.
