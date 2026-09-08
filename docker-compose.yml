@@ -1,54 +1,29 @@
 services:
-  db:
-    image: pgvector/pgvector:pg16
-    container_name: startup_db
-    restart: always
-    ports:
-      - "5432:5432"
-    env_file:
-      - .env
-    environment:
-      POSTGRES_USER: admin
-      POSTGRES_PASSWORD: admin1234
-      POSTGRES_DB: startup_platform
-    volumes:
-      - db_data:/var/lib/postgresql/data
-      - ${DB_INIT_DIR:-./DB}/01_schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U admin -d startup_platform"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
-
   backend:
     build:
       context: ./Backend
-    ports:
-      - "8000:8000"
-    environment:
-      LLM_API_URL: http://llm:8001
-      DATABASE_URL: postgresql://admin:admin1234@db:5432/startup_platform
     volumes:
       - ./Backend:/app
-    depends_on:
-      db:
-        condition: service_healthy
-      llm:
-        condition: service_started
 
   llm:
     build:
       context: ./LLM
-    ports:
-      - "8001:8001"
-    environment:
-      PORT: "8001"
-      DATABASE_URL: postgresql://admin:admin1234@db:5432/startup_platform
     volumes:
       - ./LLM:/app
-    depends_on:
-      db:
-        condition: service_healthy
+    ports:
+      - "8001:8001"
+
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: startup_db
+    restart: always
+    env_file:
+      - .env
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./DB/01_schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
 
 volumes:
   db_data:
