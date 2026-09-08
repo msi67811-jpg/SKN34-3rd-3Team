@@ -2,8 +2,8 @@ import argparse
 
 from src.core.config import get_settings
 from src.data import get_document_catalog
-from src.features.index_cache import load_or_build_document_index
-from src.features.pdf_loader import PdfDocumentError
+from src.features.document_processing import PdfDocumentError
+from src.features.indexing import load_or_build_document_index
 from src.models import ModelConfigurationError, get_embedding_model
 
 

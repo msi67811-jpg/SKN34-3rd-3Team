@@ -10,7 +10,7 @@ def test_health_endpoint() -> None:
     body = response.json()
     assert body["status"] == "ok"
     assert body["service"] == "policy-rag-llm"
-    assert body["components"]["data_source"] == "in_memory"
+    assert body["components"]["data_source"] == "postgres"
 
 
 def test_test_ui_origin_is_allowed() -> None:

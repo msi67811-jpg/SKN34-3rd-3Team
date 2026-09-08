@@ -2,11 +2,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.core.config import get_settings
-from src.rag.runtime import RagRuntime
 from src.serving.ai_routes import router as ai_router
-from src.serving.rag_routes import router as rag_router
-from src.serving.spec_routes import router as spec_router
+from src.serving.rag_routes import RagRuntime, router as rag_router
 from src.serving.schemas import ComponentConfiguration, HealthResponse
+from src.serving.spec_routes import router as spec_router
 
 
 APP_VERSION = "0.1.0"
@@ -64,11 +63,7 @@ def create_app(runtime: RagRuntime | None = None) -> FastAPI:
                     if settings_config.embedding_configured
                     else "not_configured"
                 ),
-                data_source=(
-                    "pgvector"
-                    if settings_config.pgvector_enabled
-                    else "in_memory"
-                ),
+                data_source=settings_config.vector_store_backend,
             ),
         )
 

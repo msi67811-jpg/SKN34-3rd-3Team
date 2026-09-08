@@ -45,6 +45,24 @@ class InMemoryVectorSearch:
         """
         self._vector_store.dump(str(path))
 
+    def get_chunks(self) -> list[RagChunk]:
+        """Dense 저장소에 적재된 모든 Chunk의 복사본을 반환한다.
+
+        Returns:
+            BM25 등 다른 검색 방식에서 동일하게 사용할 RAG Chunk 목록.
+        """
+        return [
+            {
+                "chunk_id": str(stored_document["metadata"]["chunk_id"]),
+                "policy_id": int(stored_document["metadata"]["policy_id"]),
+                "title": str(stored_document["metadata"]["title"]),
+                "source": str(stored_document["metadata"]["source"]),
+                "page": int(stored_document["metadata"]["page"]),
+                "content": str(stored_document["text"]),
+            }
+            for stored_document in self._vector_store.store.values()
+        ]
+
     @classmethod
     def load(cls, path: Path, *, embedding: Embeddings) -> "InMemoryVectorSearch":
         """원본 문서를 다시 임베딩하지 않고 로컬 Vector 인덱스를 복원한다.

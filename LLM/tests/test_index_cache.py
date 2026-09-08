@@ -4,7 +4,7 @@ from langchain_core.embeddings import Embeddings
 
 from src.core.config import Settings
 from src.data import get_document_catalog
-from src.features.index_cache import load_or_build_document_index
+from src.features.indexing import load_or_build_document_index
 
 
 class CountingEmbedding(Embeddings):

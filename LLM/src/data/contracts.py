@@ -1,4 +1,4 @@
-from typing import TypedDict
+from typing import Literal, NotRequired, TypedDict
 
 
 class BusinessProfile(TypedDict):
@@ -29,6 +29,64 @@ class Policy(TypedDict):
     apply_end_date: str
 
 
+class PolicyRow(TypedDict):
+    """PostgreSQL `policies`에서 읽은 정제 전 레코드 구조."""
+
+    id: int
+    title: str | None
+    region: str | None
+    industry: str | None
+    target: str | None
+    benefit: str | None
+
+
+class CleanPolicy(TypedDict):
+    """검색 의미를 보존하면서 문자열 노이즈를 제거한 정책 구조."""
+
+    policy_id: int
+    title: str | None
+    region: str | None
+    industry: str | None
+    target: str | None
+    benefit: str | None
+
+
+class PreparedPolicy(TypedDict):
+    """Chunking과 Embedding 직전 단계의 RAG 정책 구조."""
+
+    policy_id: int
+    content: str
+    metadata: dict[str, str]
+
+
+class TaxDocumentRow(TypedDict):
+    """PostgreSQL ``tax_documents``에서 조회한 원본 레코드."""
+
+    id: int
+    title: str | None
+    law_name: str | None
+    content: str | None
+    source: str | None
+
+
+class CleanTaxDocument(TypedDict):
+    """정책과 동일한 텍스트 규칙으로 정제한 세법 문서."""
+
+    tax_document_id: int
+    title: str | None
+    law_name: str | None
+    content: str | None
+    source: str | None
+
+
+class PreparedTaxDocument(TypedDict):
+    """Chunking과 Embedding 직전 단계의 세법 문서."""
+
+    tax_document_id: int
+    content: str
+    metadata: dict[str, str]
+
+
 class EligibilityResult(TypedDict):
     """Backend가 계산한 정책 자격 판정 결과 구조."""
 
@@ -42,10 +100,23 @@ class RagChunk(TypedDict):
     """Embedding과 검색에 사용하는 RAG Chunk 구조."""
 
     chunk_id: str
-    policy_id: int
+    policy_id: int | None
     title: str
     source: str
     page: int
+    content: str
+    source_type: NotRequired[Literal["policy", "announcement", "tax_document"]]
+    source_id: NotRequired[int]
+
+
+class RagSourceDocument(TypedDict):
+    """실제 DB 원천 레코드를 Chunking하기 위한 공통 문서 구조."""
+
+    source_type: Literal["policy", "announcement", "tax_document"]
+    source_id: int
+    policy_id: int | None
+    title: str
+    source: str
     content: str
 
 

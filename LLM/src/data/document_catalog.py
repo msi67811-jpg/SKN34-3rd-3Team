@@ -1,45 +1,46 @@
-from copy import deepcopy
 from pathlib import Path
+import re
 
 from src.data.contracts import DocumentCatalogEntry
 
 
-SOURCE_PDF_DIR = Path(__file__).resolve().parent
+SOURCE_PDF_DIR = Path(__file__).resolve().parent / "RAG_data"
 
-# Backend/DB가 문서-정책 관계를 제공하기 전까지 사용하는 임시 mapping이다.
-_DOCUMENT_CATALOG: tuple[DocumentCatalogEntry, ...] = (
-    {
-        "policy_id": 103,
-        "title": "청년 직무경험 지원사업 공고",
-        "file_name": "01_청년_직무경험_지원사업_공고.pdf",
-    },
-    {
-        "policy_id": 102,
-        "title": "청년 주거이전비 지원사업 공고",
-        "file_name": "02_청년_주거이전비_지원사업_공고.pdf",
-    },
-    {
-        "policy_id": 101,
-        "title": "지역청년 초기창업 사업화지원 공고",
-        "file_name": "03_지역청년_초기창업_사업화지원_공고.pdf",
-    },
-    {
-        "policy_id": 104,
-        "title": "중소기업 청년근속장려금 지원사업 공고",
-        "file_name": "04_중소기업_청년근속장려금_지원사업_공고.pdf",
-    },
-    {
-        "policy_id": 105,
-        "title": "청년 문화활동비 지원사업 공고",
-        "file_name": "05_청년_문화활동비_지원사업_공고.pdf",
-    },
-)
+# 기존 Mock Backend에서 사용 중인 1~5번 문서의 policy_id는 유지한다.
+_EXISTING_POLICY_IDS = {1: 103, 2: 102, 3: 101, 4: 104, 5: 105}
+_DOCUMENT_NUMBER_PATTERN = re.compile(r"^(\d+)_")
 
 
 def get_document_catalog() -> list[DocumentCatalogEntry]:
-    """공용 원본을 변경할 수 없도록 문서 catalog 복사본을 반환한다.
+    """RAG_data 폴더의 PDF를 탐색해 문서 catalog를 생성한다.
 
     Returns:
-        원본 PDF 파일명, 제목, 임시 policy_id를 담은 catalog 목록.
+        PDF 파일명, 제목, 임시 policy_id를 담은 catalog 목록.
+
+    Raises:
+        ValueError: PDF 파일명이 ``숫자_제목.pdf`` 규칙을 따르지 않을 때.
     """
-    return deepcopy(list(_DOCUMENT_CATALOG))
+    catalog: list[DocumentCatalogEntry] = []
+
+    for pdf_path in sorted(SOURCE_PDF_DIR.glob("*.pdf")):
+        number_match = _DOCUMENT_NUMBER_PATTERN.match(pdf_path.name)
+        if number_match is None:
+            raise ValueError(
+                f"PDF file name must follow '<number>_<title>.pdf': {pdf_path.name}"
+            )
+
+        document_number = int(number_match.group(1))
+        title = pdf_path.stem.split("_", maxsplit=1)[1].replace("_", " ")
+        title = title.removesuffix(" 실제공고문형")
+        catalog.append(
+            {
+                "policy_id": _EXISTING_POLICY_IDS.get(
+                    document_number,
+                    100 + document_number,
+                ),
+                "title": title,
+                "file_name": pdf_path.name,
+            }
+        )
+
+    return catalog

@@ -8,10 +8,9 @@ from src.core.config import Settings
 from src.data import get_rag_chunks
 from src.features import build_mock_vector_index
 from src.rag.contracts import EligibilityDecision
-from src.rag.guardrails import INSUFFICIENT_EVIDENCE_ANSWER
-from src.rag.guardrails import RagInputError
+from src.rag.guardrails import INSUFFICIENT_EVIDENCE_ANSWER, RagInputError
 from src.rag.service import RagService
-from src.vectorstores.base import VectorSearch
+from tests.fakes import make_grounded_fake_model
 
 
 def make_settings(**overrides: object) -> Settings:
@@ -25,7 +24,7 @@ def make_settings(**overrides: object) -> Settings:
 
 def test_grounded_answer_contains_sources() -> None:
     index = build_mock_vector_index(DeterministicFakeEmbedding(size=32))
-    llm = FakeListChatModel(responses=["근거 기반 답변입니다. [출처 1]"])
+    llm = make_grounded_fake_model(answer="근거 기반 답변입니다. [출처 1]")
     service = RagService(
         vector_search=index,
         llm_factory=lambda: llm,
@@ -102,7 +101,9 @@ def test_backend_decision_is_returned_unchanged() -> None:
     )
     service = RagService(
         vector_search=index,
-        llm_factory=lambda: FakeListChatModel(responses=["판정 근거 설명 [출처 1]"]),
+        llm_factory=lambda: make_grounded_fake_model(
+            answer="판정 근거 설명 [출처 1]"
+        ),
         settings=make_settings(),
     )
 
@@ -157,3 +158,46 @@ def test_out_of_scope_question_skips_search_and_llm() -> None:
     assert result.grounded is False
     assert result.sources == ()
     assert calls == {"search": 0, "llm": 0}
+
+
+def test_invalid_generated_citation_returns_safe_fallback() -> None:
+    service = RagService(
+        vector_search=build_mock_vector_index(DeterministicFakeEmbedding(size=16)),
+        llm_factory=lambda: make_grounded_fake_model(cited_source_numbers=[99]),
+        settings=make_settings(invalid_generation_answer="안전한 대체 답변"),
+    )
+
+    result = asyncio.run(
+        service.answer(get_rag_chunks()[0]["content"], policy_id=101)
+    )
+
+    assert result.answer == "안전한 대체 답변"
+    assert result.grounded is False
+    assert result.sources == ()
+    assert result.guardrail_reason == "generation_validation_failed"
+
+
+def test_only_cited_prompt_chunk_is_returned_as_source() -> None:
+    first_chunk = get_rag_chunks()[0].copy()
+    second_chunk = get_rag_chunks()[1].copy()
+    first_chunk["score"] = 0.9
+    second_chunk["score"] = 0.8
+
+    class OrderedVectorSearch:
+        def add_chunks(self, _chunks: list) -> list[str]:
+            return []
+
+        def search(self, *_args: object, **_kwargs: object) -> list:
+            return [first_chunk, second_chunk]
+
+    service = RagService(
+        vector_search=OrderedVectorSearch(),
+        llm_factory=lambda: make_grounded_fake_model(cited_source_numbers=[2]),
+        settings=make_settings(),
+    )
+
+    result = asyncio.run(service.answer("지원 정책의 신청 기간을 알려줘"))
+
+    assert result.grounded is True
+    assert len(result.sources) == 1
+    assert result.sources[0].chunk_id == second_chunk["chunk_id"]

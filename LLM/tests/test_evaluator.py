@@ -4,8 +4,11 @@ from pathlib import Path
 import pytest
 from pydantic import TypeAdapter
 
-from src.evaluation.contracts import EvaluationCase, EvaluationObservation
-from src.evaluation.evaluator import evaluate_cases
+from src.evaluation.evaluator import (
+    EvaluationCase,
+    EvaluationObservation,
+    evaluate_cases,
+)
 
 
 class FakeEvaluationClient:
@@ -74,9 +77,13 @@ def test_sample_dataset_matches_evaluation_contract() -> None:
         dataset_path.read_text(encoding="utf-8")
     )
 
-    assert len(cases) == 5
-    assert any(case.should_block for case in cases)
-    assert any(case.relevant_policy_ids for case in cases)
+    assert len(cases) == 30
+    assert {
+        policy_id
+        for case in cases
+        for policy_id in case.relevant_policy_ids
+    } == set(range(101, 121))
+    assert all(not case.should_block for case in cases)
 
 
 def test_insufficient_evidence_is_counted_as_a_guardrail_block() -> None:

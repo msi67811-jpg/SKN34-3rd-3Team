@@ -1,7 +1,7 @@
 import pytest
 from langchain_core.documents import Document
 
-from src.features.chunking import split_pdf_pages
+from src.features.document_processing import split_pdf_pages
 
 
 def make_page(content: str = "첫 번째 문장입니다. 두 번째 문장입니다.") -> Document:

@@ -1,37 +1,212 @@
 [
   {
-    "case_id": "startup-support-001",
-    "user_id": 1,
-    "question": "초기 창업자를 위한 지원정책과 신청 조건을 알려줘",
-    "relevant_policy_ids": [101],
+    "case_id": "job-experience-allowance-001",
+    "user_id": 3,
+    "question": "취업 준비 중인데 회사 실무 경험도 쌓고 참여수당도 받을 수 있는 청년 지원사업이 있을까?",
+    "relevant_policy_ids": [103],
     "should_block": false
   },
   {
-    "case_id": "housing-support-001",
-    "user_id": 1,
-    "question": "청년 주거이전비 지원정책을 알려줘",
+    "case_id": "moving-expense-support-001",
+    "user_id": 3,
+    "question": "최근에 이사했는데 이사비나 부동산 중개수수료를 지원받을 수 있을까?",
     "relevant_policy_ids": [102],
     "should_block": false
   },
   {
-    "case_id": "employment-support-001",
+    "case_id": "regional-early-startup-001",
+    "user_id": 1,
+    "question": "가상광역권에서 창업한 지 얼마 안 됐는데 사업화 자금 지원정책이 있을까?",
+    "relevant_policy_ids": [101],
+    "should_block": false
+  },
+  {
+    "case_id": "youth-retention-incentive-001",
     "user_id": 2,
-    "question": "청년 직무경험과 근속 장려금 지원사업을 알려줘",
+    "question": "중소기업에 정규직으로 취업했는데 오래 근무하면 받을 수 있는 청년 장려금이 있어?",
+    "relevant_policy_ids": [104],
+    "should_block": false
+  },
+  {
+    "case_id": "culture-points-001",
+    "user_id": 3,
+    "question": "공연이나 전시, 영화 같은 문화생활에 쓸 수 있는 청년 지원이 있을까?",
+    "relevant_policy_ids": [105],
+    "should_block": false
+  },
+  {
+    "case_id": "pre-startup-commercialization-001",
+    "user_id": 3,
+    "question": "아직 사업자등록은 안 했지만 창업을 준비 중이야. 사업화 자금과 멘토링을 받을 수 있을까?",
+    "relevant_policy_ids": [106],
+    "should_block": false
+  },
+  {
+    "case_id": "early-startup-growth-001",
+    "user_id": 2,
+    "question": "초기 창업기업을 운영 중인데 사업을 키우기 위한 자금이나 성장진단 지원이 있을까?",
+    "relevant_policy_ids": [107],
+    "should_block": false
+  },
+  {
+    "case_id": "local-business-startup-001",
+    "user_id": 1,
+    "question": "지역 특색을 살린 로컬 사업을 시작하려는데 받을 수 있는 창업 지원이 있어?",
+    "relevant_policy_ids": [108],
+    "should_block": false
+  },
+  {
+    "case_id": "technology-prototype-001",
+    "user_id": 2,
+    "question": "기술 아이디어로 시제품을 만들고 성능시험도 해보고 싶은데 지원사업이 있을까?",
+    "relevant_policy_ids": [109],
+    "should_block": false
+  },
+  {
+    "case_id": "small-business-online-sales-001",
+    "user_id": 1,
+    "question": "소상공인인데 온라인 판매용 상세페이지나 광고를 지원하는 정책이 있을까?",
+    "relevant_policy_ids": [110],
+    "should_block": false
+  },
+  {
+    "case_id": "startup-incubation-space-001",
+    "user_id": 3,
+    "question": "창업 초기라 사무실이 필요한데 저렴한 입주공간이나 보육상담을 지원받을 수 있어?",
+    "relevant_policy_ids": [111],
+    "should_block": false
+  },
+  {
+    "case_id": "business-loan-interest-001",
+    "user_id": 1,
+    "question": "사업자대출 이자가 부담되는데 청년 창업자를 위한 이자 지원정책이 있을까?",
+    "relevant_policy_ids": [112],
+    "should_block": false
+  },
+  {
+    "case_id": "restart-commercialization-001",
+    "user_id": 2,
+    "question": "예전에 폐업했고 다시 창업하려고 하는데 재도전 지원사업이 있을까?",
+    "relevant_policy_ids": [113],
+    "should_block": false
+  },
+  {
+    "case_id": "startup-club-validation-001",
+    "user_id": 3,
+    "question": "친구들과 창업 아이디어를 검증해보고 싶은데 청년 창업동아리 지원이 있어?",
+    "relevant_policy_ids": [114],
+    "should_block": false
+  },
+  {
+    "case_id": "agri-food-startup-001",
+    "user_id": 1,
+    "question": "식품이나 푸드테크 제품을 개발하려는데 청년 창업 지원사업이 있을까?",
+    "relevant_policy_ids": [115],
+    "should_block": false
+  },
+  {
+    "case_id": "content-production-001",
+    "user_id": 3,
+    "question": "영상이나 웹콘텐츠를 만드는 스타트업인데 제작비와 현지화 비용을 지원받을 수 있을까?",
+    "relevant_policy_ids": [116],
+    "should_block": false
+  },
+  {
+    "case_id": "social-innovation-startup-001",
+    "user_id": 3,
+    "question": "환경이나 돌봄 같은 사회문제를 해결하는 사업을 준비 중인데 창업 지원이 있을까?",
+    "relevant_policy_ids": [117],
+    "should_block": false
+  },
+  {
+    "case_id": "overseas-market-entry-001",
+    "user_id": 2,
+    "question": "제품을 해외에 팔아보고 싶은데 시장조사나 현지화를 지원하는 청년 정책이 있을까?",
+    "relevant_policy_ids": [118],
+    "should_block": false
+  },
+  {
+    "case_id": "intellectual-property-001",
+    "user_id": 2,
+    "question": "특허나 상표를 출원하려는데 청년 창업기업이 비용을 지원받을 수 있을까?",
+    "relevant_policy_ids": [119],
+    "should_block": false
+  },
+  {
+    "case_id": "rental-deposit-interest-001",
+    "user_id": 3,
+    "question": "전월세 보증금 대출이자가 부담되는데 청년 주거 지원을 받을 수 있을까?",
+    "relevant_policy_ids": [120],
+    "should_block": false
+  },
+  {
+    "case_id": "ambiguous-pre-startup-001",
+    "user_id": 3,
+    "question": "아직 사업자등록 전인데 혼자 준비하거나 팀으로 아이디어를 검증할 수 있는 창업 지원이 뭐가 있어?",
+    "relevant_policy_ids": [106, 114],
+    "should_block": false
+  },
+  {
+    "case_id": "ambiguous-housing-cost-001",
+    "user_id": 3,
+    "question": "청년이 이사하거나 집을 구할 때 받을 수 있는 주거비 지원이 뭐가 있어?",
+    "relevant_policy_ids": [102, 120],
+    "should_block": false
+  },
+  {
+    "case_id": "ambiguous-interest-support-001",
+    "user_id": 1,
+    "question": "사업하면서 대출이자나 특허 출원비 같은 비용을 지원받을 수 있을까?",
+    "relevant_policy_ids": [112, 119],
+    "should_block": false
+  },
+  {
+    "case_id": "ambiguous-production-support-001",
+    "user_id": 2,
+    "question": "청년 창업기업이 시제품이나 식품을 개발할 때 받을 수 있는 제작 지원이 있어?",
+    "relevant_policy_ids": [109, 115],
+    "should_block": false
+  },
+  {
+    "case_id": "ambiguous-market-entry-001",
+    "user_id": 1,
+    "question": "온라인이나 해외로 판매처를 넓히고 싶은 청년 사업자를 위한 지원이 있을까?",
+    "relevant_policy_ids": [110, 118],
+    "should_block": false
+  },
+  {
+    "case_id": "ambiguous-early-startup-funding-001",
+    "user_id": 2,
+    "question": "가상광역권에서 창업한 지 얼마 안 됐어. 사업화 자금이나 성장진단 지원이 있을까?",
+    "relevant_policy_ids": [101, 107],
+    "should_block": false
+  },
+  {
+    "case_id": "ambiguous-local-startup-base-001",
+    "user_id": 3,
+    "question": "지역자원으로 로컬 창업을 하려는데 사업비뿐 아니라 작업할 공간 지원도 있을까?",
+    "relevant_policy_ids": [108, 111],
+    "should_block": false
+  },
+  {
+    "case_id": "ambiguous-youth-employment-001",
+    "user_id": 2,
+    "question": "청년이 취업 전 실무 경험을 쌓거나 취업 후 오래 근무할 때 받을 수 있는 지원이 있어?",
     "relevant_policy_ids": [103, 104],
     "should_block": false
   },
   {
-    "case_id": "out-of-scope-weather-001",
-    "user_id": 1,
-    "question": "오늘 날씨가 어때?",
-    "relevant_policy_ids": [],
-    "should_block": true
+    "case_id": "ambiguous-culture-content-001",
+    "user_id": 3,
+    "question": "문화생활을 하거나 콘텐츠 사업을 만드는 청년에게 지원되는 정책이 있을까?",
+    "relevant_policy_ids": [105, 116],
+    "should_block": false
   },
   {
-    "case_id": "mixed-domain-001",
-    "user_id": 1,
-    "question": "나와 관련된 정책 알려줘 그리고 파이썬 append에 관해 알려줘",
-    "relevant_policy_ids": [],
-    "should_block": true
+    "case_id": "ambiguous-specialized-startup-001",
+    "user_id": 3,
+    "question": "폐업 후 다시 시작하거나 사회문제 해결형 창업을 할 때 받을 수 있는 지원이 있을까?",
+    "relevant_policy_ids": [113, 117],
+    "should_block": false
   }
 ]

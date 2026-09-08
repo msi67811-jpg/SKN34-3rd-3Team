@@ -1,6 +1,28 @@
 from collections.abc import Iterable
 
-from src.evaluation.contracts import GuardrailMetrics, RetrievalMetrics
+from pydantic import BaseModel
+
+
+class RetrievalMetrics(BaseModel):
+    """평가 케이스 한 건의 P@k, R@k, RR과 AP@k."""
+
+    precision_at_k: float
+    recall_at_k: float
+    reciprocal_rank: float
+    average_precision: float
+
+
+class GuardrailMetrics(BaseModel):
+    """차단을 Positive로 정의한 Guardrail 이진 분류 지표."""
+
+    accuracy: float
+    precision: float
+    recall: float
+    f1: float
+    true_positive: int
+    false_positive: int
+    true_negative: int
+    false_negative: int
 
 
 def precision_at_k(predicted: Iterable[int], relevant: set[int], k: int) -> float:

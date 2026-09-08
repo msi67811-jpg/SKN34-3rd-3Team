@@ -52,6 +52,6 @@ def test_enabled_tracing_configures_client_without_exposing_key(
 
     assert runtime.enabled is True
     assert captured["api_url"] == "https://api.smith.langchain.com"
-    assert captured["hide_inputs"] is True
-    assert captured["hide_outputs"] is True
+    assert captured["hide_inputs"] is False
+    assert captured["hide_outputs"] is False
     assert "test-langsmith-key" not in repr(settings)

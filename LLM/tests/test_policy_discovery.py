@@ -4,9 +4,9 @@ from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
 from src.core.config import Settings
 from src.data import get_rag_chunks, get_user_profile
-from src.rag.discovery import PolicyDiscoveryService
+from src.rag.discovery import PolicyDiscoveryService, build_personalized_query
 from src.rag.guardrails import INSUFFICIENT_EVIDENCE_ANSWER
-from src.rag.query_builder import build_personalized_query
+from tests.fakes import make_discovery_fake_model
 
 
 class CapturingVectorSearch:
@@ -67,8 +67,23 @@ def test_discovery_searches_all_documents_and_groups_policies() -> None:
     )
     service = PolicyDiscoveryService(
         vector_search=vector_search,
-        llm_factory=lambda: FakeListChatModel(
-            responses=["사용자 조건과 관련된 정책 요약입니다. [출처 1] [출처 2]"]
+        llm_factory=lambda: make_discovery_fake_model(
+            [
+                {
+                    "policy_id": 101,
+                    "summary": "초기창업 지원정책 요약",
+                    "relevance_reasons": ["창업 조건 관련"],
+                    "requirements_to_verify": [],
+                    "cited_source_numbers": [1],
+                },
+                {
+                    "policy_id": 102,
+                    "summary": "주거이전비 지원정책 요약",
+                    "relevance_reasons": ["청년 조건 관련"],
+                    "requirements_to_verify": [],
+                    "cited_source_numbers": [2],
+                },
+            ]
         ),
         settings=settings(),
     )
@@ -166,8 +181,16 @@ def test_compound_policy_question_is_allowed_when_all_clauses_are_in_scope() -> 
     vector_search = CapturingVectorSearch([search_result(0, 0.9)])
     service = PolicyDiscoveryService(
         vector_search=vector_search,
-        llm_factory=lambda: FakeListChatModel(
-            responses=["관련 정책과 신청 기간입니다. [출처 1]"]
+        llm_factory=lambda: make_discovery_fake_model(
+            [
+                {
+                    "policy_id": 101,
+                    "summary": "관련 정책과 신청 기간입니다.",
+                    "relevance_reasons": ["신청 기간 관련"],
+                    "requirements_to_verify": [],
+                    "cited_source_numbers": [1],
+                }
+            ]
         ),
         settings=settings(),
     )
@@ -181,3 +204,36 @@ def test_compound_policy_question_is_allowed_when_all_clauses_are_in_scope() -> 
 
     assert result.grounded is True
     assert vector_search.query
+
+
+def test_unretrieved_generated_policy_returns_safe_fallback() -> None:
+    vector_search = CapturingVectorSearch([search_result(0, 0.9)])
+    service = PolicyDiscoveryService(
+        vector_search=vector_search,
+        llm_factory=lambda: make_discovery_fake_model(
+            [
+                {
+                    "policy_id": 999,
+                    "summary": "검색되지 않은 정책",
+                    "relevance_reasons": [],
+                    "requirements_to_verify": [],
+                    "cited_source_numbers": [1],
+                }
+            ]
+        ),
+        settings=Settings(
+            _env_file=None,
+            langsmith_tracing=False,
+            min_relevance_score=0.0,
+            invalid_generation_answer="안전한 대체 답변",
+        ),
+    )
+
+    result = asyncio.run(
+        service.discover("관련 정책을 알려줘", user=get_user_profile(1))
+    )
+
+    assert result.answer == "안전한 대체 답변"
+    assert result.grounded is False
+    assert result.policies == ()
+    assert result.guardrail_reason == "generation_validation_failed"

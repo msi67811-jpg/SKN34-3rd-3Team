@@ -1,7 +1,6 @@
 import re
 
 from src.data.contracts import VectorSearchResult
-from src.rag.contracts import EligibilityDecision
 
 
 INSUFFICIENT_EVIDENCE_ANSWER = (
@@ -17,6 +16,10 @@ _CLAUSE_SEPARATOR = re.compile(
 
 class RagInputError(ValueError):
     """RAG 요청이 입력값 Guardrail을 위반했을 때 발생한다."""
+
+
+class GenerationValidationError(ValueError):
+    """LLM 구조화 출력이 근거 기반 생성 규칙을 위반했을 때 발생한다."""
 
 
 def validate_question(question: str, *, max_length: int) -> str:
@@ -116,15 +119,119 @@ def keep_grounded_results(
     ]
 
 
-def preserve_decision(
-    decision: EligibilityDecision | None,
-) -> EligibilityDecision | None:
-    """Backend 판정값을 재계산하거나 변경하지 않고 그대로 반환한다.
+def validate_generated_text(generated_text: str, *, field_name: str) -> str:
+    """LLM이 생성한 필수 문자열이 비어 있지 않은지 검사한다.
 
     Args:
-        decision: Backend가 Source of Truth로 확정한 선택적 자격 판정 결과.
+        generated_text: 구조화 출력에서 검증할 문자열.
+        field_name: 오류 메시지에서 식별할 구조화 출력 필드명.
 
     Returns:
-        입력받은 동일한 EligibilityDecision 객체 또는 None.
+        앞뒤 공백을 제거한 생성 문자열.
+
+    Raises:
+        GenerationValidationError: 생성 문자열이 비어 있거나 공백뿐일 때.
     """
-    return decision
+    normalized_text = generated_text.strip()
+    if not normalized_text:
+        raise GenerationValidationError(f"{field_name} must not be blank")
+    return normalized_text
+
+
+def validate_citation_numbers(
+    cited_source_numbers: list[int],
+    *,
+    source_count: int,
+) -> tuple[int, ...]:
+    """LLM 출처 번호의 범위를 검증하고 중복을 제거한다.
+
+    Args:
+        cited_source_numbers: LLM 구조화 출력에 포함된 출처 번호 목록.
+        source_count: Prompt에 실제 포함된 검색 근거 개수.
+
+    Returns:
+        최초 등장 순서를 유지하면서 중복을 제거한 출처 번호 tuple.
+
+    Raises:
+        GenerationValidationError: 출처가 없거나 실제 범위를 벗어난 번호가 있을 때.
+        ValueError: source_count가 음수일 때.
+    """
+    if source_count < 0:
+        raise ValueError("source_count must not be negative")
+
+    unique_source_numbers = tuple(dict.fromkeys(cited_source_numbers))
+    if not unique_source_numbers:
+        raise GenerationValidationError("At least one source citation is required")
+
+    invalid_source_numbers = [
+        source_number
+        for source_number in unique_source_numbers
+        if not 1 <= source_number <= source_count
+    ]
+    if invalid_source_numbers:
+        raise GenerationValidationError(
+            f"Invalid source numbers: {invalid_source_numbers}"
+        )
+    return unique_source_numbers
+
+
+def validate_generated_policy_ids(
+    generated_policy_ids: list[int],
+    *,
+    retrieved_policy_ids: set[int],
+) -> tuple[int, ...]:
+    """LLM이 검색 결과에 없는 policy_id를 생성하지 않았는지 검사한다.
+
+    Args:
+        generated_policy_ids: 정책 탐색 구조화 출력의 policy_id 목록.
+        retrieved_policy_ids: Prompt에 포함된 Chunk에서 확인한 실제 policy_id 집합.
+
+    Returns:
+        중복이 없는 검증된 policy_id tuple.
+
+    Raises:
+        GenerationValidationError: 정책이 없거나 검색되지 않은 ID가 포함됐을 때.
+    """
+    unique_policy_ids = tuple(dict.fromkeys(generated_policy_ids))
+    if not unique_policy_ids:
+        raise GenerationValidationError("At least one generated policy is required")
+    if len(unique_policy_ids) != len(generated_policy_ids):
+        raise GenerationValidationError("Generated policy IDs must not be duplicated")
+
+    unknown_policy_ids = [
+        policy_id
+        for policy_id in unique_policy_ids
+        if policy_id not in retrieved_policy_ids
+    ]
+    if unknown_policy_ids:
+        raise GenerationValidationError(
+            f"Generated policy IDs were not retrieved: {unknown_policy_ids}"
+        )
+    return unique_policy_ids
+
+
+def validate_policy_citations(
+    policy_id: int,
+    citation_numbers: tuple[int, ...],
+    retrieved_chunks: tuple[VectorSearchResult, ...],
+) -> None:
+    """정책 요약의 출처 번호가 동일한 policy_id의 Chunk를 가리키는지 검사한다.
+
+    Args:
+        policy_id: 구조화 출력에서 검증된 정책 ID.
+        citation_numbers: 범위 검증과 중복 제거가 끝난 출처 번호.
+        retrieved_chunks: Prompt에 번호 순서대로 포함된 실제 Chunk.
+
+    Raises:
+        GenerationValidationError: 다른 정책의 Chunk를 출처로 사용했을 때.
+    """
+    invalid_citations = [
+        source_number
+        for source_number in citation_numbers
+        if retrieved_chunks[source_number - 1]["policy_id"] != policy_id
+    ]
+    if invalid_citations:
+        raise GenerationValidationError(
+            f"Policy {policy_id} used citations from another policy: "
+            f"{invalid_citations}"
+        )

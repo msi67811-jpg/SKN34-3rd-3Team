@@ -28,3 +28,7 @@ class VectorSearch(Protocol):
             Chunk 본문, 출처 metadata와 유사도 점수를 담은 검색 결과 목록.
         """
         ...
+
+    def get_chunks(self) -> list[RagChunk]:
+        """현재 검색기에 적재된 모든 Chunk의 복사본을 반환한다."""
+        ...

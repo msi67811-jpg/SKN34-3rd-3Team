@@ -1,21 +1,33 @@
 import asyncio
 from collections.abc import Callable
 
+from langchain_core.exceptions import OutputParserException
 from langchain_core.language_models.chat_models import BaseChatModel
 from langsmith import traceable, tracing_context
+from pydantic import ValidationError
 
 from src.core.config import Settings
 from src.core.langsmith import configure_langsmith
-from src.rag.chain import generate_answer
+from src.rag.chain import (
+    compact_grounded_answer,
+    format_grounded_answer,
+    generate_answer,
+)
 from src.rag.contracts import EligibilityDecision, RagAnswer, SourceCitation
+from src.rag.context_builder import (
+    build_prompt_context,
+    select_chunks_by_source_numbers,
+)
 from src.rag.guardrails import (
+    GenerationValidationError,
     INSUFFICIENT_EVIDENCE_ANSWER,
     is_question_in_scope,
-    preserve_decision,
+    validate_citation_numbers,
+    validate_generated_text,
     validate_question,
     validate_top_k,
 )
-from src.rag.retriever import RagRetriever
+from src.rag.retriever import retrieve_relevant_chunks
 from src.vectorstores.base import VectorSearch
 
 
@@ -36,10 +48,7 @@ class RagService:
             llm_factory: 근거가 있을 때만 채팅 모델을 생성할 함수.
             settings: 검색 임계값, Guardrail과 LangSmith 설정.
         """
-        self._retriever = RagRetriever(
-            vector_search,
-            min_score=settings.min_relevance_score,
-        )
+        self._vector_search = vector_search
         self._llm_factory = llm_factory
         self._settings = settings
 
@@ -73,7 +82,6 @@ class RagService:
         result_limit = validate_top_k(
             top_k if top_k is not None else self._settings.default_top_k
         )
-        preserved_decision = preserve_decision(decision)
         if not is_question_in_scope(
             normalized_question,
             allowed_keywords=self._settings.allowed_rag_keywords,
@@ -83,7 +91,7 @@ class RagService:
                 answer=self._settings.out_of_scope_answer,
                 grounded=False,
                 sources=(),
-                decision=preserved_decision,
+                decision=decision,
                 guardrail_reason="out_of_scope",
             )
         langsmith_runtime = configure_langsmith(self._settings)
@@ -99,7 +107,7 @@ class RagService:
                 normalized_question,
                 policy_id=policy_id,
                 top_k=result_limit,
-                decision=preserved_decision,
+                decision=decision,
             )
 
     @traceable(name="rag_answer", run_type="chain")
@@ -123,10 +131,12 @@ class RagService:
             근거가 없으면 차단 결과, 있으면 LLM 답변과 출처를 담은 결과.
         """
         relevant_chunks = await asyncio.to_thread(
-            self._retriever.retrieve,
+            retrieve_relevant_chunks,
+            self._vector_search,
             question,
             policy_id=policy_id,
             top_k=top_k,
+            min_score=self._settings.min_relevance_score,
         )
         if not relevant_chunks:
             return RagAnswer(
@@ -137,18 +147,43 @@ class RagService:
                 guardrail_reason="insufficient_evidence",
             )
 
-        generated_answer = await generate_answer(
-            self._llm_factory(),
-            question=question,
-            results=relevant_chunks,
-            decision=decision,
+        prompt_context = build_prompt_context(
+            relevant_chunks,
+            max_context_characters=self._settings.max_context_characters,
+            max_chunks_per_policy=self._settings.max_chunks_per_policy,
+        )
+        try:
+            structured_answer = await generate_answer(
+                self._llm_factory(),
+                question=question,
+                prompt_context=prompt_context,
+                decision=decision,
+            )
+            structured_answer = compact_grounded_answer(structured_answer)
+            validate_generated_text(structured_answer.answer, field_name="answer")
+            citation_numbers = validate_citation_numbers(
+                structured_answer.cited_source_numbers,
+                source_count=len(prompt_context.selected_chunks),
+            )
+        except (GenerationValidationError, OutputParserException, ValidationError):
+            return RagAnswer(
+                answer=self._settings.invalid_generation_answer,
+                grounded=False,
+                sources=(),
+                decision=decision,
+                guardrail_reason="generation_validation_failed",
+            )
+
+        cited_chunks = select_chunks_by_source_numbers(
+            prompt_context,
+            citation_numbers,
         )
         source_citations = tuple(
-            SourceCitation.from_search_result(retrieved_chunk)
-            for retrieved_chunk in relevant_chunks
+            SourceCitation.from_search_result(cited_chunk)
+            for cited_chunk in cited_chunks
         )
         return RagAnswer(
-            answer=generated_answer.strip(),
+            answer=format_grounded_answer(structured_answer),
             grounded=bool(source_citations),
             sources=source_citations,
             decision=decision,

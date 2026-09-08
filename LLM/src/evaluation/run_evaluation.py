@@ -1,17 +1,84 @@
 import argparse
 import asyncio
 from pathlib import Path
+from time import perf_counter
 
+from httpx import AsyncClient
 from pydantic import TypeAdapter
 
-from src.evaluation.contracts import EvaluationCase
-from src.evaluation.evaluator import evaluate_cases
-from src.evaluation.http_client import HttpRecommendationClient
+from src.evaluation.evaluator import (
+    EvaluationCase,
+    EvaluationObservation,
+    evaluate_cases,
+)
 
 
 PROJECT_DIR = Path(__file__).resolve().parents[2]
 DEFAULT_DATASET = PROJECT_DIR / "evaluation/sample_cases.json"
 DEFAULT_OUTPUT = PROJECT_DIR / "evaluation/results/latest_report.json"
+
+
+class HttpRecommendationClient:
+    """현재 내부 정책 추천 API를 평가기에 연결하는 HTTP adapter."""
+
+    def __init__(self, base_url: str, *, timeout_seconds: float = 60.0) -> None:
+        """평가용 비동기 HTTP Client를 초기화한다.
+
+        Args:
+            base_url: 실행 중인 LLM FastAPI 서버의 기본 URL.
+            timeout_seconds: 평가 요청 한 건의 최대 대기 시간.
+        """
+        self._client = AsyncClient(
+            base_url=base_url.rstrip("/"),
+            timeout=timeout_seconds,
+        )
+
+    async def __aenter__(self) -> "HttpRecommendationClient":
+        """async with 문에서 현재 Client를 반환한다."""
+        return self
+
+    async def __aexit__(self, *_args: object) -> None:
+        """async with 문을 종료할 때 HTTP 연결을 닫는다."""
+        await self._client.aclose()
+
+    async def prepare_index(self) -> None:
+        """평가 전에 서버 프로세스의 RAG 인덱스를 준비한다."""
+        index_response = await self._client.post("/internal/rag/index")
+        index_response.raise_for_status()
+
+    async def recommend(
+        self,
+        *,
+        user_id: int,
+        question: str,
+        top_k: int,
+    ) -> EvaluationObservation:
+        """정책 추천 API 응답을 평가에 필요한 관찰값으로 변환한다.
+
+        Args:
+            user_id: 평가 질문에 사용할 사용자 식별자.
+            question: 검색·Guardrail을 평가할 사용자 질문.
+            top_k: 정책 검색에 사용할 최대 결과 개수.
+
+        Returns:
+            예측 정책 순위, Guardrail 사유와 응답 시간을 담은 관찰값.
+        """
+        request_started_at = perf_counter()
+        recommendation_response = await self._client.post(
+            "/internal/rag/recommendations",
+            json={"user_id": user_id, "question": question, "top_k": top_k},
+        )
+        response_latency_ms = (perf_counter() - request_started_at) * 1000
+        recommendation_response.raise_for_status()
+        response_body = recommendation_response.json()
+        return EvaluationObservation(
+            predicted_policy_ids=[
+                int(policy["policy_id"])
+                for policy in response_body.get("policies", [])
+            ],
+            guardrail_reason=response_body.get("guardrail_reason"),
+            latency_ms=response_latency_ms,
+        )
 
 
 def build_parser() -> argparse.ArgumentParser:

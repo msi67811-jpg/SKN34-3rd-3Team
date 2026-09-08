@@ -29,6 +29,31 @@ def test_openai_configuration_is_detected_without_exposing_secret() -> None:
     assert "test-secret" not in repr(settings)
 
 
+def test_cohere_configuration_is_detected_without_exposing_secret() -> None:
+    settings = Settings(
+        _env_file=None,
+        cohere_api_key=SecretStr("cohere-secret"),
+    )
+
+    assert settings.cohere_configured is True
+    assert settings.cohere_rerank_model == "rerank-v4.0-fast"
+    assert "cohere-secret" not in repr(settings)
+
+
+def test_database_components_are_used_when_url_is_placeholder() -> None:
+    settings = Settings(
+        _env_file=None,
+        database_url=SecretStr("YOUR_DATABASE_URL"),
+        postgres_user="admin",
+        postgres_password=SecretStr("database-secret"),
+        postgres_db="startup_platform",
+        db_host="localhost",
+    )
+
+    assert settings.database_configured is True
+    assert "database-secret" not in repr(settings)
+
+
 def test_cors_origins_are_parsed_from_comma_separated_setting() -> None:
     settings = Settings(
         _env_file=None,
@@ -69,6 +94,33 @@ def test_guardrail_keywords_and_answer_are_configurable() -> None:
             "MIN_RELEVANCE_SCORE must be between 0 and 1",
         ),
         ({"max_question_length": 0}, "MAX_QUESTION_LENGTH must be at least 1"),
+        (
+            {"max_context_characters": 0},
+            "MAX_CONTEXT_CHARACTERS must be at least 1",
+        ),
+        (
+            {"max_chunks_per_policy": 0},
+            "MAX_CHUNKS_PER_POLICY must be at least 1",
+        ),
+        (
+            {"hybrid_dense_candidate_k": 0},
+            "HYBRID_DENSE_CANDIDATE_K must be at least 1",
+        ),
+        (
+            {"hybrid_bm25_candidate_k": 0},
+            "HYBRID_BM25_CANDIDATE_K must be at least 1",
+        ),
+        ({"hybrid_rrf_k": 0}, "HYBRID_RRF_K must be at least 1"),
+        (
+            {"cohere_rerank_candidate_k": 0},
+            "COHERE_RERANK_CANDIDATE_K must be at least 1",
+        ),
+        ({"tax_max_hops": 0}, "TAX_MAX_HOPS must be at least 1"),
+        (
+            {"database_connect_timeout": 0},
+            "DATABASE_CONNECT_TIMEOUT must be at least 1",
+        ),
+        ({"db_port": 0}, "DB_PORT must be between 1 and 65535"),
     ],
 )
 def test_invalid_rag_settings_are_rejected(
@@ -77,3 +129,8 @@ def test_invalid_rag_settings_are_rejected(
 ) -> None:
     with pytest.raises(ValidationError, match=message):
         Settings(_env_file=None, **overrides)
+
+
+def test_blank_invalid_generation_answer_is_rejected() -> None:
+    with pytest.raises(ValidationError, match="INVALID_GENERATION_ANSWER"):
+        Settings(_env_file=None, invalid_generation_answer="   ")

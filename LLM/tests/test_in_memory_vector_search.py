@@ -43,6 +43,16 @@ def test_add_chunks_does_not_mutate_mock_data() -> None:
     assert chunks == original_chunks
 
 
+def test_get_chunks_returns_copy_with_original_metadata() -> None:
+    original_chunks = get_rag_chunks()
+    index = build_mock_vector_index(DeterministicFakeEmbedding(size=16))
+
+    stored_chunks = index.get_chunks()
+    stored_chunks[0]["content"] = "변경된 테스트 본문"
+
+    assert index.get_chunks() == original_chunks
+
+
 @pytest.mark.parametrize("query", ["", "   "])
 def test_blank_query_is_rejected(query: str) -> None:
     index = build_mock_vector_index(DeterministicFakeEmbedding(size=16))

@@ -9,16 +9,15 @@ from fastapi import APIRouter, Depends, File, UploadFile
 from pydantic import BaseModel, Field
 
 from src.core.config import Settings, get_settings
-from src.rag.runtime import RagRuntime
 from src.serving.ai_routes import (
+    AnnouncementSummarizeRequest,
     ReceiptOcrRequest,
     TaxExplainRequest,
-    AnnouncementSummarizeRequest,
-    ocr_receipt,
     explain_tax_reduction,
+    ocr_receipt,
     summarize_announcement,
 )
-from src.serving.rag_routes import answer, create_index, get_runtime, ready
+from src.serving.rag_routes import RagRuntime, answer, create_index, get_runtime, ready
 from src.serving.schemas import IndexRequest, RagAnswerRequest
 
 

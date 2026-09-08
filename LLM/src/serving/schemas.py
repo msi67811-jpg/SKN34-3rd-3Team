@@ -2,8 +2,16 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from src.rag.answer import AnswerStatus
 
-ComponentState = Literal["configured", "not_configured", "mock", "in_memory", "pgvector"]
+
+ComponentState = Literal[
+    "configured",
+    "not_configured",
+    "mock",
+    "in_memory",
+    "postgres",
+]
 
 
 class ComponentConfiguration(BaseModel):
@@ -37,13 +45,14 @@ class RagAnswerRequest(BaseModel):
     policy_id: int | None = None
     top_k: int | None = None
     decision: EligibilityDecisionRequest | None = None
+    user_id: int | None = None
 
 
 class SourceResponse(BaseModel):
     """RAG 답변에서 사용자에게 제공할 Chunk 출처."""
 
     chunk_id: str
-    policy_id: int
+    policy_id: int | None
     title: str
     source: str
     page: int
@@ -55,10 +64,16 @@ class RagAnswerResponse(BaseModel):
     """특정 정책의 근거 기반 답변과 출처 응답."""
 
     answer: str
+    route: Literal["policy", "notice", "tax"]
+    status: AnswerStatus
     grounded: bool
     sources: list[SourceResponse]
     decision: EligibilityDecisionRequest | None = None
-    guardrail_reason: Literal["out_of_scope", "insufficient_evidence"] | None = None
+    guardrail_reason: Literal[
+        "out_of_scope",
+        "insufficient_evidence",
+        "generation_validation_failed",
+    ] | None = None
 
 
 class PolicyRecommendationRequest(BaseModel):
@@ -84,7 +99,11 @@ class PolicyRecommendationResponse(BaseModel):
     answer: str
     grounded: bool
     policies: list[MatchedPolicyResponse]
-    guardrail_reason: Literal["out_of_scope", "insufficient_evidence"] | None = None
+    guardrail_reason: Literal[
+        "out_of_scope",
+        "insufficient_evidence",
+        "generation_validation_failed",
+    ] | None = None
 
 
 class IndexRequest(BaseModel):
