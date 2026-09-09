@@ -1,9 +1,10 @@
 import asyncio
+import base64
 from collections.abc import Callable
 from functools import partial
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from langchain_core.embeddings import Embeddings
 from langchain_core.language_models.chat_models import BaseChatModel
 from starlette.concurrency import run_in_threadpool
@@ -24,23 +25,44 @@ from src.features.indexing import (
 )
 from src.models import ModelConfigurationError, get_embedding_model, get_llm
 from src.rag.contracts import EligibilityDecision, SourceCitation
+from src.rag.backend_tasks import (
+    extract_receipt,
+    generate_deductibility,
+    generate_legal_basis,
+    summarize_announcement,
+)
 from src.rag.discovery import PolicyDiscoveryService
 from src.rag.graph import GraphState, build_graph
 from src.rag.guardrails import RagInputError, validate_question, validate_top_k
+from src.rag.reranker import CohereRerankError, rerank_documents
 from src.serving.schemas import (
+    AnnouncementSummaryRequest,
+    AnnouncementSummaryResponse,
+    BackendUserContext,
+    DeductibilityRequest,
+    DeductibilityResponse,
     EligibilityDecisionRequest,
     IndexRequest,
     IndexResponse,
+    LegalBasisRequest,
+    LegalBasisResponse,
     MatchedPolicyResponse,
     PolicyRecommendationRequest,
     PolicyRecommendationResponse,
     RagAnswerRequest,
     RagAnswerResponse,
+    RagChatRequest,
+    RagChatResponse,
+    RagChatSource,
+    RagReindexRequest,
     ReadyResponse,
+    ReceiptExtractionResponse,
     SourceResponse,
 )
+from src.serving.errors import upstream_http_exception
 from src.vectorstores.base import VectorSearch
 from src.vectorstores.hybrid import HybridSearch
+from src.vectorstores.postgres import PostgresVectorSearch, RagDocumentNotFoundError
 
 
 class RagIndexNotReadyError(RuntimeError):
@@ -56,7 +78,6 @@ class RagRuntime:
         embedding_factory: Callable[[], Embeddings] = get_embedding_model,
         llm_factory: Callable[[], BaseChatModel] = get_llm,
         notice_search: Callable[[GraphState], list[dict[str, object]]] | None = None,
-        tax_calculator: Callable[[GraphState], dict[str, object]] | None = None,
     ) -> None:
         """모델 팩토리와 비어 있는 RAG 실행 상태를 초기화한다.
 
@@ -67,7 +88,6 @@ class RagRuntime:
         self.embedding_factory = embedding_factory
         self.llm_factory = llm_factory
         self.notice_search = notice_search
-        self.tax_calculator = tax_calculator
         self.index_lock = asyncio.Lock()
         self._vector_search: VectorSearch | None = None
         self.document_count = 0
@@ -130,6 +150,11 @@ class RagRuntime:
 
 
 router = APIRouter(prefix="/internal/rag", tags=["internal-rag"])
+adapter_router = APIRouter(prefix="/rag", tags=["backend-adapter"])
+ocr_router = APIRouter(prefix="/ocr", tags=["backend-adapter"])
+
+MAX_RECEIPT_BYTES = 4 * 1024 * 1024
+SUPPORTED_RECEIPT_MEDIA_TYPES = {"image/jpeg", "image/png", "image/webp"}
 
 
 def get_runtime(request: Request) -> RagRuntime:
@@ -189,72 +214,13 @@ async def create_index(
     Raises:
         HTTPException: 설정 누락, PDF 처리 또는 Embedding 요청에 실패했을 때.
     """
-    force_rebuild = request_body.force if request_body is not None else False
-    if rag_runtime.ready and not force_rebuild:
-        return _index_response(rag_runtime, "already_ready")
-
-    async with rag_runtime.index_lock:
-        if rag_runtime.ready and not force_rebuild:
-            return _index_response(rag_runtime, "already_ready")
-
-        try:
-            embedding_model = rag_runtime.embedding_factory()
-            if settings_config.vector_store_backend == "postgres":
-                cached_vector_index = await run_in_threadpool(
-                    partial(
-                        load_or_build_postgres_index,
-                        embedding=embedding_model,
-                        settings=settings_config,
-                        force=force_rebuild,
-                    )
-                )
-            else:
-                document_catalog = get_document_catalog()
-                cached_vector_index = await run_in_threadpool(
-                    partial(
-                        load_or_build_document_index,
-                        embedding=embedding_model,
-                        settings=settings_config,
-                        catalog=document_catalog,
-                        force=force_rebuild,
-                    )
-                )
-            runtime_search: VectorSearch = cached_vector_index.vector_search
-            if settings_config.retrieval_mode == "hybrid":
-                runtime_search = HybridSearch(
-                    dense_search=cached_vector_index.vector_search,
-                    chunks=cached_vector_index.vector_search.get_chunks(),
-                    dense_candidate_k=settings_config.hybrid_dense_candidate_k,
-                    bm25_candidate_k=settings_config.hybrid_bm25_candidate_k,
-                    rrf_k=settings_config.hybrid_rrf_k,
-                )
-            rag_runtime.set_index(
-                runtime_search,
-                document_count=cached_vector_index.document_count,
-                chunk_count=cached_vector_index.chunk_count,
-                index_source=(
-                    "cache"
-                    if cached_vector_index.loaded_from_cache
-                    else "embedding"
-                ),
-            )
-        except (ModelConfigurationError, DatabaseConfigurationError) as exc:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=str(exc),
-            ) from exc
-        except (FileNotFoundError, PdfDocumentError, ValueError) as exc:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail=str(exc),
-            ) from exc
-        except Exception as exc:
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail="Document embedding failed.",
-            ) from exc
-
-    return _index_response(rag_runtime, "ready")
+    return await _prepare_index(
+        force=request_body.force if request_body is not None else False,
+        document_ids=[],
+        allow_ready_shortcut=True,
+        rag_runtime=rag_runtime,
+        settings=settings_config,
+    )
 
 
 @router.post("/answer", response_model=RagAnswerResponse)
@@ -277,42 +243,17 @@ async def answer(
         HTTPException: 인덱스 미준비, 입력 오류 또는 외부 모델 호출 실패 시.
     """
     try:
-        normalized_question = validate_question(
-            request_body.question,
-            max_length=settings_config.max_question_length,
-        )
-        result_limit = validate_top_k(
-            request_body.top_k or settings_config.default_top_k
-        )
-        eligibility_decision = _to_domain_decision(request_body.decision)
-        user_context = None
-        if request_body.user_id is not None:
-            user_context = (
-                get_database_user_profile(request_body.user_id, settings_config)
-                if settings_config.vector_store_backend == "postgres"
-                else get_mock_user_profile(request_body.user_id)
-            )
-        hybrid_search = (
-            rag_runtime.require_hybrid_index(settings_config)
-            if rag_runtime.ready
-            else None
-        )
-        graph = build_graph(
-            rag_runtime.llm_factory(),
-            policy_search=hybrid_search,
-            tax_search=hybrid_search,
+        graph_result = await _execute_graph(
+            question=request_body.question,
+            category=None,
+            policy_id=request_body.policy_id,
+            top_k=request_body.top_k,
+            decision=_to_domain_decision(request_body.decision),
+            user_context=None,
+            user_id=request_body.user_id,
             notice_search=rag_runtime.notice_search,
-            tax_calculator=rag_runtime.tax_calculator,
+            rag_runtime=rag_runtime,
             settings=settings_config,
-        )
-        graph_result = await graph.ainvoke(
-            {
-                "query": normalized_question,
-                "policy_id": request_body.policy_id,
-                "top_k": result_limit,
-                "decision": eligibility_decision,
-                "user_context": user_context,
-            }
         )
         source_responses = [
             _graph_source_response(source)
@@ -327,12 +268,8 @@ async def answer(
             sources=source_responses,
             decision=request_body.decision,
             guardrail_reason=(
-                "insufficient_evidence"
-                if graph_result["answer_status"]
-                in {"no_result", "insufficient_evidence"}
-                else "generation_validation_failed"
-                if graph_result["answer_status"] == "error"
-                else None
+                graph_result.get("guardrail_reason")
+                or _graph_guardrail_reason(str(graph_result["answer_status"]))
             ),
         )
     except RagIndexNotReadyError as exc:
@@ -356,10 +293,621 @@ async def answer(
             detail=str(exc),
         ) from exc
     except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="RAG answer generation failed.",
+        raise upstream_http_exception(
+            exc,
+            fallback_message="RAG answer generation failed.",
         ) from exc
+
+
+@adapter_router.get("/ready", response_model=ReadyResponse)
+async def adapter_ready(
+    rag_runtime: RagRuntime = Depends(get_runtime),
+    settings_config: Settings = Depends(get_settings),
+) -> ReadyResponse:
+    """Backend 명세 경로에서 기존 인덱스 준비 상태를 반환한다."""
+    return await ready(rag_runtime, settings_config)
+
+
+@adapter_router.post("/reindex", response_model=IndexResponse)
+async def adapter_reindex(
+    request_body: RagReindexRequest | None = None,
+    rag_runtime: RagRuntime = Depends(get_runtime),
+    settings_config: Settings = Depends(get_settings),
+) -> IndexResponse:
+    """Backend의 명시적 전체 또는 PostgreSQL 부분 재색인 요청을 수행한다."""
+    return await _prepare_index(
+        force=request_body.force if request_body is not None else False,
+        document_ids=request_body.documentIds if request_body is not None else [],
+        allow_ready_shortcut=False,
+        rag_runtime=rag_runtime,
+        settings=settings_config,
+    )
+
+
+async def _prepare_index(
+    *,
+    force: bool,
+    document_ids: list[int],
+    allow_ready_shortcut: bool,
+    rag_runtime: RagRuntime,
+    settings: Settings,
+) -> IndexResponse:
+    """인덱스 초기 준비와 Backend의 명시적 재색인을 동일 lock에서 처리한다."""
+    requested_ids = list(dict.fromkeys(document_ids))
+    if any(document_id < 1 for document_id in requested_ids):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="documentIds must contain only positive integers",
+        )
+    if requested_ids and settings.vector_store_backend != "postgres":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="documentIds partial reindex requires the postgres backend",
+        )
+    if allow_ready_shortcut and rag_runtime.ready and not force:
+        return _index_response(rag_runtime, "already_ready")
+
+    async with rag_runtime.index_lock:
+        if allow_ready_shortcut and rag_runtime.ready and not force:
+            return _index_response(rag_runtime, "already_ready")
+        try:
+            embedding_model = rag_runtime.embedding_factory()
+            if requested_ids:
+                postgres_search = PostgresVectorSearch(
+                    embedding=embedding_model,
+                    settings=settings,
+                )
+                processed_ids = await run_in_threadpool(
+                    partial(
+                        postgres_search.reindex_document_ids,
+                        requested_ids,
+                        force=force,
+                    )
+                )
+                total_document_count, total_chunk_count = await run_in_threadpool(
+                    postgres_search.counts
+                )
+                runtime_search = _runtime_search(postgres_search, settings)
+                index_source: Literal["cache", "embedding"] = (
+                    "embedding" if postgres_search.last_embedded_count else "cache"
+                )
+                rag_runtime.set_index(
+                    runtime_search,
+                    document_count=total_document_count,
+                    chunk_count=total_chunk_count,
+                    index_source=index_source,
+                )
+                return IndexResponse(
+                    status=(
+                        "ready"
+                        if postgres_search.last_embedded_count
+                        else "already_ready"
+                    ),
+                    source=index_source,
+                    document_count=len(processed_ids),
+                    chunk_count=len(processed_ids),
+                    requested_document_ids=processed_ids,
+                )
+
+            if settings.vector_store_backend == "postgres":
+                cached_vector_index = await run_in_threadpool(
+                    partial(
+                        load_or_build_postgres_index,
+                        embedding=embedding_model,
+                        settings=settings,
+                        force=force,
+                    )
+                )
+            else:
+                document_catalog = get_document_catalog()
+                cached_vector_index = await run_in_threadpool(
+                    partial(
+                        load_or_build_document_index,
+                        embedding=embedding_model,
+                        settings=settings,
+                        catalog=document_catalog,
+                        force=force,
+                    )
+                )
+            runtime_search = _runtime_search(
+                cached_vector_index.vector_search,
+                settings,
+            )
+            index_source = (
+                "cache" if cached_vector_index.loaded_from_cache else "embedding"
+            )
+            rag_runtime.set_index(
+                runtime_search,
+                document_count=cached_vector_index.document_count,
+                chunk_count=cached_vector_index.chunk_count,
+                index_source=index_source,
+            )
+            return _index_response(
+                rag_runtime,
+                "already_ready" if cached_vector_index.loaded_from_cache else "ready",
+            )
+        except RagDocumentNotFoundError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(exc),
+            ) from exc
+        except (ModelConfigurationError, DatabaseConfigurationError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=str(exc),
+            ) from exc
+        except (FileNotFoundError, PdfDocumentError, ValueError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=str(exc),
+            ) from exc
+        except Exception as exc:
+            raise upstream_http_exception(
+                exc,
+                fallback_message="Document embedding failed.",
+            ) from exc
+
+
+def _runtime_search(vector_search: VectorSearch, settings: Settings) -> VectorSearch:
+    """설정에 따라 Dense 검색기를 그대로 쓰거나 Hybrid 검색기로 감싼다."""
+    if settings.retrieval_mode != "hybrid":
+        return vector_search
+    return HybridSearch(
+        dense_search=vector_search,
+        chunks=vector_search.get_chunks(),
+        dense_candidate_k=settings.hybrid_dense_candidate_k,
+        bm25_candidate_k=settings.hybrid_bm25_candidate_k,
+        rrf_k=settings.hybrid_rrf_k,
+    )
+
+
+@adapter_router.post("/chat", response_model=RagChatResponse)
+async def adapter_chat(
+    request_body: RagChatRequest,
+    rag_runtime: RagRuntime = Depends(get_runtime),
+    settings_config: Settings = Depends(get_settings),
+) -> RagChatResponse:
+    """Backend 사용자 Context와 공고 결과를 LangGraph 입력에 연결한다."""
+    try:
+        user_context = _backend_user_context(request_body.userContext)
+        graph_result = await _execute_graph(
+            question=request_body.question,
+            category=request_body.category,
+            policy_id=None,
+            top_k=None,
+            decision=None,
+            user_context=user_context,
+            user_id=None,
+            notice_search=(
+                (
+                    lambda _state: [
+                        notice.model_dump(mode="json", exclude_none=True)
+                        for notice in request_body.noticeResults or []
+                    ]
+                )
+                if request_body.noticeResults is not None
+                else None
+            ),
+            rag_runtime=rag_runtime,
+            settings=settings_config,
+        )
+        sources = [
+            _backend_source(source)
+            for source in graph_result.get("answer_sources", [])
+        ]
+        return RagChatResponse(
+            answer=str(graph_result["answer"]),
+            sources=sources,
+            grounded=bool(sources),
+            route=graph_result["route"],
+            status=graph_result["answer_status"],
+            guardrail_reason=(
+                graph_result.get("guardrail_reason")
+                or _graph_guardrail_reason(str(graph_result["answer_status"]))
+            ),
+        )
+    except (ModelConfigurationError, LangSmithConfigurationError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+    except RagInputError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+    except Exception as exc:
+        raise upstream_http_exception(
+            exc,
+            fallback_message="RAG chat failed.",
+        ) from exc
+
+
+@adapter_router.post("/legal-basis", response_model=LegalBasisResponse)
+async def adapter_legal_basis(
+    request_body: LegalBasisRequest,
+    rag_runtime: RagRuntime = Depends(get_runtime),
+    settings_config: Settings = Depends(get_settings),
+) -> LegalBasisResponse:
+    """Backend가 확정한 세액감면 판정을 보존하며 법령 근거를 설명한다."""
+    reasons = [reason.strip() for reason in request_body.reasons if reason.strip()]
+    if not reasons:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="reasons must contain at least one non-blank item",
+        )
+    conditions = request_body.conditions.model_dump(exclude_none=True)
+    query = _legal_basis_query(request_body.eligible, reasons, conditions)
+    try:
+        evidence = await _retrieve_tax_evidence(
+            query,
+            rag_runtime=rag_runtime,
+            settings=settings_config,
+        )
+        if not evidence:
+            return LegalBasisResponse(
+                reasons=reasons,
+                legalBasis="현재 확인된 법령 문서에서 판정 근거를 찾지 못했습니다.",
+                sources=[],
+                grounded=False,
+                status="no_result",
+                llmUsed=False,
+            )
+        generated, citations = await generate_legal_basis(
+            rag_runtime.llm_factory(),
+            eligible=request_body.eligible,
+            reasons=reasons,
+            conditions=conditions,
+            evidence=evidence,
+        )
+        sources = [_backend_source(evidence[number - 1]) for number in citations]
+        return LegalBasisResponse(
+            reasons=reasons,
+            legalBasis=generated.legal_basis,
+            sources=sources,
+            grounded=bool(sources),
+            status="success",
+            llmUsed=True,
+        )
+    except RagIndexNotReadyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+    except (ModelConfigurationError, LangSmithConfigurationError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+    except Exception as exc:
+        raise upstream_http_exception(
+            exc,
+            fallback_message="Legal basis generation failed.",
+        ) from exc
+
+
+@adapter_router.post("/deductibility", response_model=DeductibilityResponse)
+async def adapter_deductibility(
+    request_body: DeductibilityRequest,
+    rag_runtime: RagRuntime = Depends(get_runtime),
+    settings_config: Settings = Depends(get_settings),
+) -> DeductibilityResponse:
+    """지출 정보와 Tax RAG 근거로 경비 인정 가능성을 분석한다."""
+    category = request_body.category.strip()
+    vendor = request_body.vendor.strip()
+    if not category or not vendor:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="category and vendor must not be blank",
+        )
+    expense = {
+        "category": category,
+        "amount": request_body.amount,
+        "vendor": vendor,
+        "items": [item.strip() for item in request_body.items if item.strip()],
+    }
+    query = (
+        f"사업 경비 인정 가능성: 카테고리 {category}, 상호 {vendor}, "
+        f"금액 {request_body.amount}원, 품목 {', '.join(expense['items']) or '없음'}"
+    )
+    try:
+        evidence = await _retrieve_tax_evidence(
+            query,
+            rag_runtime=rag_runtime,
+            settings=settings_config,
+        )
+        if not evidence:
+            return DeductibilityResponse(
+                deductible=False,
+                confidence=0,
+                basis="현재 확인된 세법 문서만으로는 경비 인정 가능성을 판단할 수 없습니다.",
+                sources=[],
+                grounded=False,
+                status="no_result",
+                llmUsed=False,
+            )
+        generated, citations = await generate_deductibility(
+            rag_runtime.llm_factory(),
+            expense=expense,
+            evidence=evidence,
+        )
+        sources = [_backend_source(evidence[number - 1]) for number in citations]
+        return DeductibilityResponse(
+            deductible=generated.deductible,
+            confidence=generated.confidence,
+            basis=generated.basis,
+            sources=sources,
+            grounded=bool(sources),
+            status="success",
+            llmUsed=True,
+        )
+    except RagIndexNotReadyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+    except (ModelConfigurationError, LangSmithConfigurationError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+    except Exception as exc:
+        raise upstream_http_exception(
+            exc,
+            fallback_message="Deductibility analysis failed.",
+        ) from exc
+
+
+@adapter_router.post(
+    "/summarize-announcement",
+    response_model=AnnouncementSummaryResponse,
+)
+async def adapter_summarize_announcement(
+    request_body: AnnouncementSummaryRequest,
+    rag_runtime: RagRuntime = Depends(get_runtime),
+    settings_config: Settings = Depends(get_settings),
+) -> AnnouncementSummaryResponse:
+    """Backend가 전달한 공고 원문만 사용해 구조화 요약을 생성한다."""
+    try:
+        raw_content = validate_question(
+            request_body.rawContent,
+            max_length=settings_config.max_context_characters,
+        )
+        generated = await summarize_announcement(
+            rag_runtime.llm_factory(),
+            raw_content=raw_content,
+        )
+        return AnnouncementSummaryResponse(
+            target=generated.target,
+            benefit=generated.benefit,
+            period=generated.period,
+            documents=generated.documents,
+            notes=generated.notes,
+            source=request_body.source,
+            llmUsed=True,
+        )
+    except RagInputError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+    except (ModelConfigurationError, LangSmithConfigurationError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+    except Exception as exc:
+        raise upstream_http_exception(
+            exc,
+            fallback_message="Announcement summarization failed.",
+        ) from exc
+
+
+@ocr_router.post("/receipt", response_model=ReceiptExtractionResponse)
+async def adapter_receipt_ocr(
+    image: UploadFile = File(...),
+    rag_runtime: RagRuntime = Depends(get_runtime),
+) -> ReceiptExtractionResponse:
+    """4 MiB 이하 영수증 이미지를 Vision 구조화 출력으로 추출한다."""
+    media_type = (image.content_type or "").casefold()
+    if media_type not in SUPPORTED_RECEIPT_MEDIA_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="receipt image must be JPEG, PNG, or WebP",
+        )
+    raw_image = await image.read(MAX_RECEIPT_BYTES + 1)
+    if not raw_image:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="receipt image must not be empty",
+        )
+    if len(raw_image) > MAX_RECEIPT_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail="receipt image must not exceed 4 MiB",
+        )
+    image_data_url = (
+        f"data:{media_type};base64,{base64.b64encode(raw_image).decode('ascii')}"
+    )
+    try:
+        generated = await extract_receipt(
+            rag_runtime.llm_factory(),
+            image_data_url=image_data_url,
+        )
+        return ReceiptExtractionResponse(
+            date=generated.date,
+            vendor=generated.vendor.strip() if generated.vendor else None,
+            amount=generated.amount,
+            items=[item.strip() for item in generated.items if item.strip()],
+            category=(
+                generated.category.strip() if generated.category else None
+            ),
+        )
+    except (ModelConfigurationError, LangSmithConfigurationError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+    except Exception as exc:
+        raise upstream_http_exception(
+            exc,
+            fallback_message="Receipt extraction failed.",
+        ) from exc
+
+
+async def _retrieve_tax_evidence(
+    query: str,
+    *,
+    rag_runtime: RagRuntime,
+    settings: Settings,
+) -> list[dict[str, object]]:
+    """준비된 Hybrid 인덱스에서 Tax 문서만 검색하고 선택적으로 재정렬한다."""
+    hybrid_search = rag_runtime.require_hybrid_index(settings)
+    _, _, rrf_documents = await asyncio.to_thread(
+        partial(
+            hybrid_search.search_stages,
+            query,
+            policy_id=None,
+            top_k=settings.cohere_rerank_candidate_k,
+        )
+    )
+    tax_documents = [
+        document
+        for document in rrf_documents
+        if document["policy_id"] is None
+        and document["score"] >= settings.min_relevance_score
+    ]
+    if not tax_documents:
+        return []
+    try:
+        return await asyncio.to_thread(
+            rerank_documents,
+            query,
+            tax_documents,
+            top_n=settings.default_top_k,
+            settings=settings,
+        )
+    except CohereRerankError:
+        return tax_documents[: settings.default_top_k]
+
+
+def _legal_basis_query(
+    eligible: bool,
+    reasons: list[str],
+    conditions: dict[str, object],
+) -> str:
+    """Backend 판정을 바꾸지 않는 세액감면 근거 검색어를 조립한다."""
+    condition_text = ", ".join(
+        f"{key}={value}" for key, value in conditions.items()
+    )
+    return (
+        "청년창업 중소기업 세액감면 법령 근거와 적용 요건 "
+        f"판정={'충족' if eligible else '미충족'} "
+        f"사유={'; '.join(reasons)} 조건={condition_text}"
+    )
+
+
+async def _execute_graph(
+    *,
+    question: str,
+    category: str | None,
+    policy_id: int | None,
+    top_k: int | None,
+    decision: EligibilityDecision | None,
+    user_context: dict | None,
+    user_id: int | None,
+    notice_search: Callable[[GraphState], list[dict[str, object]]] | None,
+    rag_runtime: RagRuntime,
+    settings: Settings,
+) -> GraphState:
+    """두 HTTP 계약이 공유하는 단일 LangGraph 실행 함수."""
+    normalized_question = validate_question(
+        question,
+        max_length=settings.max_question_length,
+    )
+    result_limit = validate_top_k(top_k or settings.default_top_k)
+    resolved_user_context = user_context
+    if resolved_user_context is None and user_id is not None:
+        resolved_user_context = (
+            get_database_user_profile(user_id, settings)
+            if settings.vector_store_backend == "postgres"
+            else get_mock_user_profile(user_id)
+        )
+    hybrid_search = (
+        rag_runtime.require_hybrid_index(settings) if rag_runtime.ready else None
+    )
+    graph = build_graph(
+        rag_runtime.llm_factory(),
+        policy_search=hybrid_search,
+        tax_search=hybrid_search,
+        notice_search=notice_search,
+        settings=settings,
+    )
+    return await graph.ainvoke(
+        {
+            "query": normalized_question,
+            "category": category,
+            "policy_id": policy_id,
+            "top_k": result_limit,
+            "decision": decision,
+            "user_context": resolved_user_context,
+        }
+    )
+
+
+def _backend_user_context(context: BackendUserContext | None) -> dict | None:
+    """Backend camelCase Context를 기존 Graph UserProfile 계약으로 변환한다."""
+    if context is None:
+        return None
+    return {
+        "user_id": context.userId,
+        "age": context.age,
+        "region": context.region,
+        "business": {
+            "business_type": context.businessType,
+            "industry": context.industry,
+            "business_registered_at": context.businessRegisteredAt,
+            "founded_at": context.foundedAt,
+        },
+    }
+
+
+def _backend_source(source: dict[str, object]) -> RagChatSource:
+    """Vector 또는 Notice metadata를 Backend answer_sources 계약으로 변환한다."""
+    title = source.get("title") or source.get("name") or "근거 문서"
+    url = (
+        source.get("url")
+        or source.get("sourceUrl")
+        or source.get("source")
+        or ""
+    )
+    excerpt = (
+        source.get("excerpt")
+        or source.get("content")
+        or source.get("benefit")
+        or ""
+    )
+    return RagChatSource(
+        title=str(title),
+        url=str(url),
+        source=str(url),
+        excerpt=str(excerpt)[:500],
+    )
+
+
+def _graph_guardrail_reason(
+    answer_status: str,
+) -> Literal[
+    "out_of_scope",
+    "insufficient_evidence",
+    "generation_validation_failed",
+] | None:
+    """Graph 답변 상태를 Backend가 해석하는 Guardrail 사유로 변환한다."""
+    if answer_status in {"no_result", "insufficient_evidence"}:
+        return "insufficient_evidence"
+    if answer_status == "error":
+        return "generation_validation_failed"
+    return None
 
 
 def _to_domain_decision(
@@ -476,9 +1024,9 @@ async def recommend_policies(
             detail=str(exc),
         ) from exc
     except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Policy recommendation generation failed.",
+        raise upstream_http_exception(
+            exc,
+            fallback_message="Policy recommendation generation failed.",
         ) from exc
 
 

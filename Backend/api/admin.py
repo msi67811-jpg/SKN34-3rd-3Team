@@ -3,8 +3,7 @@ from datetime import date, datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api.deps import get_admin
-from core import store
-from core.database import persist
+from core import repo
 from core.llm_client import ensure_index, llm_status
 from core.postgres import postgres_status
 from schemas.auth import LoginRequest, LoginResponse
@@ -22,7 +21,7 @@ def _parse_date(value) -> date | None:
 
 
 def _serialize_user(user: dict) -> dict:
-    profile = store.business_profiles.get(user["id"]) or {}
+    profile = repo.get_profile(user["id"]) or {}
     return {
         "id": user["id"],
         "email": user["email"],
@@ -46,147 +45,93 @@ def admin_login(body: LoginRequest):
 
 @router.get("/users", summary="사용자 목록")
 def list_users(_: dict = Depends(get_admin), page: int = Query(default=1, ge=1)):
-    rows = list(store.users.values())
-    start = (page - 1) * 20
-    return {"users": [_serialize_user(user) for user in rows[start : start + 20]]}
+    rows = repo.list_users(offset=(page - 1) * 20, limit=20)
+    return {"users": [_serialize_user(user) for user in rows]}
 
 
 @router.get("/users/{user_id}", summary="사용자 상세")
 def user_detail(user_id: int, _: dict = Depends(get_admin)):
-    user = store.users.get(user_id)
+    user = repo.get_user(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
-    chats = [m for m in store.chat_messages.values() if m["user_id"] == user_id]
-    expenses = [e for e in store.expenses.values() if e["user_id"] == user_id]
-    saved = [s for s in store.saved_policies.values() if s["user_id"] == user_id]
     return {
         "user": _serialize_user(user),
         "usage": {
-            "chatMessages": len(chats),
-            "expenses": len(expenses),
-            "savedPolicies": len(saved),
+            "chatMessages": len(repo.list_chats(user_id)),
+            "expenses": len(repo.list_expenses(user_id)),
+            "savedPolicies": len(repo.saved_policy_ids(user_id)),
         },
     }
 
 
 @router.patch("/users/{user_id}", summary="사용자 상태 변경")
 def update_user_status(user_id: int, body: dict, _: dict = Depends(get_admin)):
-    user = store.users.get(user_id)
+    user = repo.get_user(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
     status = body.get("status")
     if status not in ("active", "suspended"):
         raise HTTPException(status_code=400, detail="status는 active 또는 suspended 입니다.")
-    user["status"] = status
-    persist()
-    return {"user": _serialize_user(user)}
+    repo.update_user(user_id, {"status": status})
+    return {"user": _serialize_user(repo.get_user(user_id))}
 
 
 @router.get("/tax-documents", summary="세법 자료 목록")
 def tax_documents(_: dict = Depends(get_admin)):
-    return {"documents": list(store.tax_documents.values())}
+    return {"documents": repo.list_tax_documents()}
 
 
 @router.post("/tax-documents", summary="세법 자료 등록")
 def create_tax_document(body: dict, current: dict = Depends(get_admin)):
-    doc_id = store.next_id("taxdoc")
-    store.tax_documents[doc_id] = {
-        "id": doc_id,
-        "admin_id": current["id"],
-        "title": body.get("title"),
-        "law_name": body.get("lawName"),
-        "content": body.get("content"),
-        "source": body.get("source"),
-        "created_at": datetime.now(),
-    }
-    persist()
+    doc_id = repo.insert_tax_document(current["id"], body)
     return {"documentId": doc_id}
 
 
 @router.get("/policies", summary="정책 데이터 목록")
 def admin_policies(_: dict = Depends(get_admin)):
-    return {"policies": list(store.policies.values())}
+    return {"policies": repo.list_policies()}
 
 
 @router.post("/policies", summary="정책 데이터 등록")
 def create_policy(body: dict, current: dict = Depends(get_admin)):
-    pid = store.next_id("policy")
     start = _parse_date(body.get("applyStartDate"))
     end = _parse_date(body.get("applyEndDate"))
-    store.policies[pid] = {
-        "id": pid,
-        "admin_id": current["id"],
-        "title": body.get("title") or "제목 없음",
-        "region": body.get("region") or "전국",
-        "industry": body.get("industry") or "전 업종",
-        "target": body.get("target") or "",
-        "benefit": body.get("benefit") or body.get("content") or "",
-        "eligibility_rule": body.get("eligibilityRule") or "",
-        "source": body.get("source") or "",
-        "created_at": datetime.now(),
-    }
-    aid = store.next_id("announcement")
-    store.announcements[aid] = {
-        "id": aid,
-        "policy_id": pid,
-        "raw_content": body.get("content") or body.get("benefit") or store.policies[pid]["title"],
-        "source_url": body.get("sourceUrl") or body.get("source") or "",
-        "apply_start_date": start,
-        "apply_end_date": end,
-        "apply_method": body.get("applyMethod") or "",
-        "created_at": datetime.now(),
-    }
+    pid = repo.insert_policy(current["id"], body)
+    policy = repo.get_policy(pid)
+    aid = repo.insert_announcement(pid, {**body, "content": body.get("content") or body.get("benefit") or policy["title"]}, start, end)
     if end:
-        eid = store.next_id("event")
-        store.calendar_events[eid] = {
-            "id": eid,
-            "event_type": "POLICY",
-            "business_type": None,
-            "policy_id": pid,
-            "title": f"{store.policies[pid]['title']} 신청 마감",
-            "due_date": end,
-            "description": f"{store.policies[pid].get('source') or ''} · {store.policies[pid]['region']}",
-        }
-    persist()
+        repo.insert_event(
+            "POLICY",
+            f"{policy['title']} 신청 마감",
+            end,
+            f"{policy.get('source') or ''} · {policy['region']}",
+            policy_id=pid,
+        )
     return {"policyId": pid, "announcementId": aid}
 
 
 @router.get("/announcements", summary="공고문 목록")
 def admin_announcements(_: dict = Depends(get_admin)):
-    return {"announcements": list(store.announcements.values())}
+    return {"announcements": repo.list_announcements()}
 
 
 @router.post("/announcements", summary="공고문 등록")
 def create_announcement(body: dict, _: dict = Depends(get_admin)):
     policy_id = body.get("policyId")
-    if policy_id and policy_id not in store.policies:
+    if policy_id and not repo.get_policy(policy_id):
         raise HTTPException(status_code=404, detail="정책을 찾을 수 없습니다.")
-    aid = store.next_id("announcement")
     start = _parse_date(body.get("applyStartDate"))
     end = _parse_date(body.get("applyEndDate"))
-    store.announcements[aid] = {
-        "id": aid,
-        "policy_id": policy_id,
-        "raw_content": body.get("content") or body.get("title") or "",
-        "source_url": body.get("sourceUrl") or "",
-        "apply_start_date": start,
-        "apply_end_date": end,
-        "apply_method": body.get("applyMethod") or "",
-        "created_at": datetime.now(),
-    }
+    aid = repo.insert_announcement(policy_id, body, start, end)
     if policy_id and end:
-        eid = store.next_id("event")
-        title = store.policies[policy_id]["title"]
-        store.calendar_events[eid] = {
-            "id": eid,
-            "event_type": "POLICY",
-            "business_type": None,
-            "policy_id": policy_id,
-            "title": f"{title} 신청 마감",
-            "due_date": end,
-            "description": store.policies[policy_id].get("source") or "",
-        }
-    persist()
+        policy = repo.get_policy(policy_id)
+        repo.insert_event(
+            "POLICY",
+            f"{policy['title']} 신청 마감",
+            end,
+            policy.get("source") or "",
+            policy_id=policy_id,
+        )
     return {"announcementId": aid}
 
 
@@ -202,15 +147,15 @@ def monitoring(_: dict = Depends(get_admin)):
     llm = llm_status()
     return {
         "metrics": {
-            "users": len(store.users),
-            "activeUsers": sum(1 for u in store.users.values() if (u.get("status") or "active") == "active"),
-            "suspendedUsers": sum(1 for u in store.users.values() if u.get("status") == "suspended"),
-            "policies": len(store.policies),
-            "announcements": len(store.announcements),
-            "taxDocuments": len(store.tax_documents),
-            "chatMessages": len(store.chat_messages),
-            "expenses": len(store.expenses),
-            "reminders": len(store.reminders),
+            "users": repo.count("users"),
+            "activeUsers": repo.count_users_by_status("active"),
+            "suspendedUsers": repo.count_users_by_status("suspended"),
+            "policies": repo.count("policies"),
+            "announcements": repo.count("announcements"),
+            "taxDocuments": repo.count("tax_documents"),
+            "chatMessages": repo.count("chat_messages"),
+            "expenses": repo.count("expenses"),
+            "reminders": repo.count("reminders"),
             "ragReady": bool(llm.get("ragReady")),
             "llm": llm,
             "postgres": postgres_status(),

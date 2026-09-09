@@ -120,6 +120,8 @@ flowchart LR
 ├── LLM/             # RAG 파이프라인, 임베딩, 프롬프트, 모델 서빙
 ├── DB/              # DB 스키마 및 관련 자료
 ├── Docs/            # 기획·설계·진행 문서
+│   ├── Design/      # 현재 유효한 설계 산출물
+│   └── reports/     # 특정 시점의 검수·분석 보고서
 └── docker-compose.yml
 ```
 

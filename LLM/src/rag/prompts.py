@@ -98,7 +98,7 @@ POLICY_DISCOVERY_PROMPT = ChatPromptTemplate.from_messages(
 
 summary 예시:
 
-[자격] 
+[자격]
 - 만 18세 이상 만 34세 이하의 미취업 청년
 - 휴·폐업, 세금 체납, 채무불이행, 중복지원 기업 제외
 

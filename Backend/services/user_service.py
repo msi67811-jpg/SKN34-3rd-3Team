@@ -1,11 +1,10 @@
 from fastapi import HTTPException
 
-from core import store
-from core.database import persist
+from core import repo
 
 
 def get_me(user_id: int) -> dict:
-    user = store.users.get(user_id)
+    user = repo.get_user(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
     return {
@@ -19,17 +18,17 @@ def get_me(user_id: int) -> dict:
 
 
 def update_me(user_id: int, payload: dict) -> None:
-    user = store.users.get(user_id)
+    user = repo.get_user(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
-    for key in ("name", "age", "region", "phone"):
-        if payload.get(key) is not None:
-            user[key] = payload[key]
-    persist()
+    repo.update_user(
+        user_id,
+        {key: payload[key] for key in ("name", "age", "region", "phone") if payload.get(key) is not None},
+    )
 
 
 def get_business_profile(user_id: int) -> dict:
-    profile = store.business_profiles.get(user_id)
+    profile = repo.get_profile(user_id)
     if not profile:
         return {
             "businessType": None,
@@ -46,28 +45,10 @@ def get_business_profile(user_id: int) -> dict:
 
 
 def update_business_profile(user_id: int, payload: dict) -> None:
-    profile = store.business_profiles.get(user_id) or {
-        "id": store.next_id("biz"),
-        "user_id": user_id,
-        "business_type": None,
-        "industry": None,
-        "business_registered_at": None,
-        "founded_at": None,
-    }
-    mapping = {
-        "businessType": "business_type",
-        "industry": "industry",
-        "businessRegisteredAt": "business_registered_at",
-        "foundedAt": "founded_at",
-    }
-    for src, dest in mapping.items():
-        if payload.get(src) is not None:
-            profile[dest] = payload[src]
-    store.business_profiles[user_id] = profile
-    persist()
+    repo.upsert_profile(user_id, payload)
 
 
 def onboarding_complete(user_id: int) -> bool:
-    user = store.users.get(user_id) or {}
-    profile = store.business_profiles.get(user_id) or {}
+    user = repo.get_user(user_id) or {}
+    profile = repo.get_profile(user_id) or {}
     return bool(user.get("age") and user.get("region") and profile.get("business_type"))

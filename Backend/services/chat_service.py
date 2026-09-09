@@ -1,9 +1,6 @@
-from datetime import datetime
-
 from fastapi import HTTPException
 
-from core import store
-from core.database import persist
+from core import repo
 from core.llm_client import rag_answer
 
 SUGGESTED = {
@@ -55,8 +52,8 @@ def suggested_questions(category: str) -> list[str]:
 
 
 def _profile_prefix(user_id: int) -> str:
-    user = store.users.get(user_id, {})
-    profile = store.business_profiles.get(user_id, {})
+    user = repo.get_user(user_id) or {}
+    profile = repo.get_profile(user_id) or {}
     context = f"{user.get('name') or '회원'}님"
     extras = [x for x in (user.get("region"), profile.get("industry")) if x]
     if extras:
@@ -107,17 +104,7 @@ def send_message(user_id: int, category: str, question: str) -> dict:
         )
         sources = []
 
-    mid = store.next_id("chat")
-    store.chat_messages[mid] = {
-        "id": mid,
-        "user_id": user_id,
-        "category": category,
-        "question": question,
-        "answer": full_answer,
-        "created_at": datetime.now(),
-    }
-    store.answer_sources[mid] = sources
-    persist()
+    mid = repo.insert_chat(user_id, category, question, full_answer, sources)
     return {
         "messageId": mid,
         "answer": full_answer,
@@ -128,28 +115,14 @@ def send_message(user_id: int, category: str, question: str) -> dict:
 
 
 def get_sources(message_id: int) -> list[dict]:
-    if message_id not in store.chat_messages:
+    if not repo.get_chat(message_id):
         raise HTTPException(status_code=404, detail="메시지를 찾을 수 없습니다.")
-    return store.answer_sources.get(message_id, [])
+    return repo.chat_sources(message_id)
 
 
 def list_messages(user_id: int, category: str | None = None) -> list[dict]:
-    rows = [m for m in store.chat_messages.values() if m["user_id"] == user_id]
-    if category:
-        rows = [m for m in rows if m["category"] == category]
-    return sorted(rows, key=lambda m: m["created_at"])
+    return repo.list_chats(user_id, category)
 
 
 def clear_messages(user_id: int, category: str | None = None) -> int:
-    removed = []
-    for mid, row in list(store.chat_messages.items()):
-        if row["user_id"] != user_id:
-            continue
-        if category and row["category"] != category:
-            continue
-        removed.append(mid)
-        del store.chat_messages[mid]
-        store.answer_sources.pop(mid, None)
-    if removed:
-        persist()
-    return len(removed)
+    return repo.delete_chats(user_id, category)

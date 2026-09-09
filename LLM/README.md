@@ -133,7 +133,7 @@ Embedding 모델 컬럼이 DB에 없으면 스키마를 변경하지 않고 오�
 서버에서 인덱스를 준비한다.
 
 ```powershell
-Invoke-RestMethod -Method Post -Uri http://localhost:8000/internal/rag/index
+Invoke-RestMethod -Method Post -Uri http://localhost:8001/internal/rag/index
 ```
 
 최초 실행에는 실제 DB 원천 문서 전체의 Embedding 비용이 발생한다. 이후에는
@@ -194,12 +194,24 @@ RETRIEVAL_MODE=dense
 Backend 조회 경계만 사용한다. 현재 Backend에 Notice 구현이 없어 실제 호출은 연결
 전이며 임의 endpoint나 DB 조회를 만들지 않는다.
 
-Tax는 각 Hop에서 동일한 Hybrid Retrieval과 Cohere Rerank를 실행한 뒤 법령 근거와
+Tax는 각 Hop에서 동일한 Hybrid Retrieval과 Cohere Rerank를 실행한 뒤 검색 문서의
+`N분의 M` 비율을 별도 `tax_ratio_normalization` node에서 구조화하고, 법령 근거와
 사용자 정보의 부족 여부를 분리해 평가한다. 명시적 법령 참조를 다음 Query보다 먼저
 사용하며, `TAX_MAX_HOPS` 도달·반복 Query·새 근거 없음이면 근거 부족 상태로 종료한다.
-세금 계산이 필요해도 현재 Backend Calculator가 없으면 LLM이 직접 계산하지 않고
-`calculator_unavailable` 상태를 남긴다. Backend 함수는 Tool Calling이 아니라
-LangGraph node에 주입하는 일반 호출 경계다.
+세금 계산이 필요하면 LLM은 검색 근거에서 계산 유형·기준금액·비율·출처 번호만
+Structured Output으로 추출한다. 실제 결과는 Python `Decimal` 함수가 다시 계산하며,
+비율이 인용한 법령 근거에 없거나 기준금액이 사용자 입력에 없으면 계산하지 않는다.
+자격 판정, 과세표준 산출과 복잡한 세무 계산은 계속 Backend 책임으로 남긴다.
+
+검색된 세법 문서를 LLM Prompt에 넣을 때만 `분모분의 분자` 원문 옆에 계산한
+백분율을 함께 둔다. 예를 들어 `10분의 1(10%)`, `100분의 15(15%)`,
+`1000분의 5(0.5%)`로 전달한다. DB 원문과 Embedding용 content는 변경하지 않으므로
+이 해석 보조 규칙 때문에 재색인할 필요가 없다.
+
+Evidence 이후 edge는 세 갈래다. 근거가 부족하고 추가 검색 가능하면
+`tax_next_query`, 근거가 충분하고 계산이 필요하면 `tax_calculation`, 그 밖의 종료
+상태와 계산 불필요 질문은 `answer`로 바로 이동한다. Next Query 생성 실패·중복도
+계산으로 보내지 않고 Answer에서 종료한다.
 
 세 branch는 모두 `answer` node에서 합류한다. 성공한 요청은 route에 필요한 실제
 검색/조회 결과만 Structured Output 모델에 전달하며, 최종 출처는 모델이 생성하지
@@ -226,13 +238,46 @@ TAX_MAX_HOPS=3
 
 ## RAG API
 
+### Backend 어댑터
+
+Backend의 `core/llm_client.py`가 우선 호출하는 명세 경로를 제공한다.
+
+- `GET /rag/ready`
+- `POST /rag/reindex`
+- `POST /rag/chat`
+
+`/rag/chat`은 기존 `{ category, question }` 요청을 그대로 허용한다. 개인화와 실제
+공고 조회 연결을 위해 Backend가 다음 선택 필드를 전달할 수도 있다.
+
+```json
+{
+  "category": "policy",
+  "question": "서울에서 현재 신청 가능한 사업 있어?",
+  "userContext": {
+    "userId": 1,
+    "age": 29,
+    "region": "서울",
+    "businessType": "간이과세자",
+    "industry": "소프트웨어",
+    "businessRegisteredAt": "2024-03-01",
+    "foundedAt": "2024-03-01"
+  },
+  "noticeResults": []
+}
+```
+
+`noticeResults`가 없으면 Notice branch는 `integration_unavailable`, Backend가 실제
+조회 후 빈 배열을 전달하면 `no_result`로 구분한다. LLM은 공고 조회 SQL, 자격 판정,
+과세표준 산출 같은 Backend 비즈니스 로직을 대신 구현하지 않는다. 응답 source는 명세의 `url`과 현재 Backend
+호환용 `source`에 같은 URL을 제공한다.
+
 FastAPI 답변 전에 검색 인덱스를 명시적으로 준비해야 한다.
 
 PostgreSQL 모드에서는 실제 정책·공고문을 조회해 신규·변경 Chunk만 임베딩한다.
 In-memory 테스트 모드에서는 유효한 로컬 캐시가 있으면 PDF 재임베딩을 생략한다.
 
 ```powershell
-Invoke-RestMethod -Method Post -Uri http://localhost:8000/internal/rag/index
+Invoke-RestMethod -Method Post -Uri http://localhost:8001/internal/rag/index
 ```
 
 응답의 `source`가 `cache`이면 문서 임베딩을 재사용했고, `embedding`이면 새로
@@ -241,7 +286,7 @@ Invoke-RestMethod -Method Post -Uri http://localhost:8000/internal/rag/index
 준비 상태를 확인한다.
 
 ```powershell
-Invoke-RestMethod -Uri http://localhost:8000/internal/rag/ready
+Invoke-RestMethod -Uri http://localhost:8001/internal/rag/ready
 ```
 
 ### 사용자 기반 정책 탐색
@@ -259,7 +304,7 @@ $body = @{
 
 Invoke-RestMethod `
     -Method Post `
-    -Uri http://localhost:8000/internal/rag/recommendations `
+    -Uri http://localhost:8001/internal/rag/recommendations `
     -ContentType "application/json" `
     -Body $body
 ```
@@ -342,7 +387,7 @@ $body = @{
 
 Invoke-RestMethod `
     -Method Post `
-    -Uri http://localhost:8000/internal/rag/answer `
+    -Uri http://localhost:8001/internal/rag/answer `
     -ContentType "application/json" `
     -Body $body
 ```
@@ -426,8 +471,8 @@ uv sync
 uv run uvicorn main:app --reload
 ```
 
-- Health Check: `http://localhost:8000/health`
-- OpenAPI 문서: `http://localhost:8000/docs`
+- Health Check: `http://localhost:8001/health`
+- OpenAPI 문서: `http://localhost:8001/docs`
 
 또는 다음 명령으로 `HOST`, `PORT`, `RELOAD` 설정을 사용해 실행할 수 있다.
 
@@ -457,7 +502,7 @@ npm install
 npm run dev
 ```
 
-기본 LLM API 주소는 `http://localhost:8000`이며 `Frontend/.env`의
+기본 LLM API 주소는 `http://localhost:8001`이며 `Frontend/.env`의
 `VITE_LLM_API_URL`로 변경할 수 있다.
 
 ## Docker

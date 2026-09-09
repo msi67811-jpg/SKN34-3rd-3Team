@@ -31,13 +31,18 @@ BASE_URL = "https://apis.data.go.kr/B552735/kisedKstartupService01/getAnnounceme
 def fetch_announcements(page=1, per_page=100):
     url = (
         f"{BASE_URL}?page={page}&perPage={per_page}"
-        f"&cond[rcrt_prgs_yn::EQ]=Y"          # 모집 중인 것만
-        f"&cond[biz_trgt_age::LIKE]=만 20세 이상 ~ 만 39세 이하"  # 청년 타겟만
+        f"&cond[rcrt_prgs_yn::EQ]=Y"
+        f"&cond[biz_trgt_age::LIKE]=만 20세 이상 ~ 만 39세 이하"
         f"&returnType=json"
         f"&serviceKey={API_KEY}"
     )
-    response = requests.get(url)
-    response.raise_for_status()
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+    except requests.exceptions.HTTPError:
+        raise requests.exceptions.HTTPError(
+            f"K-Startup API 요청 실패 (page={page}, status={response.status_code}) "
+        ) from None
     return response.json()
 
 

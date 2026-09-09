@@ -174,6 +174,8 @@ CREATE TABLE rag_documents (
     updated_at        TIMESTAMP DEFAULT now()
 );
 
+CREATE INDEX ON rag_documents USING hnsw (embedding vector_cosine_ops);
+
 -- ERD와 다른 사항
 -- 1. 테이블명 전부 소문자 + 단수를 복수로 (user같은 경우 예약어인 이슈)
 -- 2. ON DELETE CASCADE를 일부 키에 걸어둠. (유저 탈퇴 시 데이터 삭제. but 관리자가 올린 정책 등 중요데이터는 미해당)
@@ -184,3 +186,4 @@ CREATE TABLE rag_documents (
 -- 7. tax_documents에 law_name 컬럼 추가 (법령 종류 구분용, 예: '조세특례제한법', '조세특례제한법 시행령')
 -- 8. policies 테이블의 지역 코드 담는 region 컬럼 크기 수정 (100에서 2000으로)
 -- 9. rag_documents 컬럼에 chunk_id, policy_id, content 컬럼 추가
+-- 10. rag_documents 테이블의 embedding 컬럼에 검색을 빠르게 해주는 인덱스를 하나 추가함. (hnsw 방식)

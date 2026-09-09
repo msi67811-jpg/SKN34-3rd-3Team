@@ -33,7 +33,7 @@ Docker Compose 기반의 컨테이너형 서비스로 구성한다.
 * **Services:** Backend, LLM, Database, Frontend
 * **Network:** Docker 내부 네트워크 기반 서비스 간 통신
 * **API Communication:** REST API
-* 예: Backend → LLM `http://llm:8000/...`
+* 예: Backend → LLM `http://llm:8001/...`
 
 ## Dependency & Environment Management
 * **Python Version:** 3.13

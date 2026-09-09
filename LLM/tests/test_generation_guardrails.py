@@ -47,4 +47,3 @@ def test_policy_citation_must_point_to_the_same_policy() -> None:
 def test_blank_generated_text_is_rejected() -> None:
     with pytest.raises(GenerationValidationError, match="must not be blank"):
         validate_generated_text("   ", field_name="answer")
-

@@ -4,6 +4,10 @@ from pydantic import SecretStr, ValidationError
 from src.core.config import Settings
 
 
+def test_llm_default_port_matches_backend_contract() -> None:
+    assert Settings(_env_file=None).port == 8001
+
+
 def test_placeholder_values_are_not_treated_as_configured() -> None:
     settings = Settings(
         _env_file=None,

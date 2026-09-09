@@ -2,28 +2,57 @@ services:
   backend:
     build:
       context: ./Backend
+    environment:
+      LLM_API_URL: http://llm:8001
+      LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-25}
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${COMPOSE_DB_HOST:-db}:${COMPOSE_DB_PORT:-5432}/${POSTGRES_DB}
+      TOKEN_SECRET: ${TOKEN_SECRET:-skn34-local-dev-secret}
+    ports:
+      - "8000:8000"
     volumes:
       - ./Backend:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      llm:
+        condition: service_started
 
   llm:
     build:
       context: ./LLM
-    volumes:
-      - ./LLM:/app
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${COMPOSE_DB_HOST:-db}:${COMPOSE_DB_PORT:-5432}/${POSTGRES_DB}
+      VECTOR_STORE_BACKEND: postgres
+      PORT: 8001
     ports:
       - "8001:8001"
+    volumes:
+      - ./LLM:/app
+    depends_on:
+      db:
+        condition: service_healthy
 
   db:
     image: pgvector/pgvector:pg16
     container_name: startup_db
     restart: always
-    env_file:
-      - .env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     ports:
       - "5432:5432"
     volumes:
       - db_data:/var/lib/postgresql/data
       - ./DB/01_schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+      - ./DB/app_extras.sql:/docker-entrypoint-initdb.d/02_app_extras.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
 volumes:
   db_data:

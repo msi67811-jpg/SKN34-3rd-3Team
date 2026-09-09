@@ -7,6 +7,7 @@ class BusinessProfile(TypedDict):
     industry: str | None
     business_type: str | None
     founded_at: str | None
+    business_registered_at: NotRequired[str | None]
 
 
 class UserProfile(TypedDict):

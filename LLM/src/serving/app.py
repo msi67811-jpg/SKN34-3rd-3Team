@@ -1,8 +1,20 @@
 from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from src.core.config import get_settings
-from src.serving.rag_routes import RagRuntime, router as rag_router
+from src.serving.errors import (
+    http_exception_handler,
+    unhandled_exception_handler,
+    validation_exception_handler,
+)
+from src.serving.rag_routes import (
+    RagRuntime,
+    adapter_router,
+    ocr_router,
+    router as rag_router,
+)
 from src.serving.schemas import ComponentConfiguration, HealthResponse
 
 
@@ -34,8 +46,19 @@ def create_app(runtime: RagRuntime | None = None) -> FastAPI:
         allow_methods=["GET", "POST", "OPTIONS"],
         allow_headers=["Content-Type"],
     )
+    fastapi_app.add_exception_handler(
+        StarletteHTTPException,
+        http_exception_handler,
+    )
+    fastapi_app.add_exception_handler(
+        RequestValidationError,
+        validation_exception_handler,
+    )
+    fastapi_app.add_exception_handler(Exception, unhandled_exception_handler)
     fastapi_app.state.rag_runtime = runtime or RagRuntime()
     fastapi_app.include_router(rag_router)
+    fastapi_app.include_router(adapter_router)
+    fastapi_app.include_router(ocr_router)
 
     @fastapi_app.get(
         "/health",

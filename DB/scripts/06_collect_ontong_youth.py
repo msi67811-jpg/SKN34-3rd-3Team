@@ -36,10 +36,15 @@ def fetch_page(page_num=1, page_size=100):
         "pageNum": page_num,
         "pageSize": page_size,
         "rtnType": "json",
-        "lclsfNm": "일자리",  
+        "lclsfNm": "일자리",
     }
-    response = requests.get(BASE_URL, params=params)
-    response.raise_for_status()
+    try:
+        response = requests.get(BASE_URL, params=params)
+        response.raise_for_status()
+    except requests.exceptions.HTTPError as e:
+        raise requests.exceptions.HTTPError(
+            f"온통청년 API 요청 실패 (page={page_num}, status={response.status_code}) "
+        ) from None
     return response.json()
 
 

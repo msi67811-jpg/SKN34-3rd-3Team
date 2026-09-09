@@ -92,7 +92,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     argument_parser.add_argument("--dataset", type=Path, default=DEFAULT_DATASET)
     argument_parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
-    argument_parser.add_argument("--base-url", default="http://localhost:8000")
+    argument_parser.add_argument("--base-url", default="http://localhost:8001")
     argument_parser.add_argument("--k", type=int, default=5)
     argument_parser.add_argument(
         "--prepare-index",

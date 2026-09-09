@@ -32,8 +32,13 @@ def fetch_services(keyword, page=1, per_page=100):
         f"&cond[서비스명::LIKE]={keyword}"
         f"&serviceKey={API_KEY}"
     )
-    response = requests.get(url)
-    response.raise_for_status()
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+    except requests.exceptions.HTTPError:
+        raise requests.exceptions.HTTPError(
+            f"정부24 API 요청 실패 (keyword={keyword}, page={page}, status={response.status_code}) "
+        ) from None
     return response.json()
 
 

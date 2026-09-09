@@ -56,8 +56,13 @@ def fetch_page(page_no=1, num_of_rows=100):
         f"{BASE_URL}?serviceKey={API_KEY}"
         f"&dataType=json&pageNo={page_no}&numOfRows={num_of_rows}"
     )
-    response = requests.get(url)
-    response.raise_for_status()
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+    except requests.exceptions.HTTPError:
+        raise requests.exceptions.HTTPError(
+            f"기업마당 API 요청 실패 (page={page_no}, status={response.status_code}) "
+        ) from None
     return response.json()
 
 

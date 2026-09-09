@@ -124,6 +124,54 @@ def test_router_uses_structured_output(
 
 
 @pytest.mark.parametrize(
+    ("category", "proposed_route", "expected_route"),
+    [
+        ("tax", "policy", "tax"),
+        ("expense", "notice", "tax"),
+        ("saving", "notice", "tax"),
+        ("saving", "policy", "policy"),
+        ("policy", "tax", "policy"),
+        ("policy", "notice", "notice"),
+    ],
+)
+def test_backend_category_limits_graph_route(
+    category: str,
+    proposed_route: str,
+    expected_route: str,
+) -> None:
+    result = asyncio.run(
+        build_graph(_router_llm(proposed_route)).ainvoke(
+            {
+                "query": "청년 창업 세금 절세 또는 지원 정책 질문",
+                "category": category,
+            }
+        )
+    )
+
+    assert result["route"] == expected_route
+
+
+def test_out_of_scope_question_skips_router_and_returns_guardrail() -> None:
+    model = FakeStructuredChatModel({})
+    settings = Settings(
+        _env_file=None,
+        out_of_scope_answer="지원하지 않는 질문입니다.",
+    )
+
+    result = asyncio.run(
+        build_graph(model, settings=settings).ainvoke(
+            {"query": "오늘 날씨 알려줘", "category": "policy"}
+        )
+    )
+
+    assert model.call_count == 0
+    assert result["route"] == "policy"
+    assert result["guardrail_reason"] == "out_of_scope"
+    assert result["answer_status"] == "no_result"
+    assert result["answer"] == "지원하지 않는 질문입니다."
+
+
+@pytest.mark.parametrize(
     "query",
     [
         "청년 창업 지원 정책에는 어떤 게 있어?",

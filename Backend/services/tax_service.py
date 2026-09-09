@@ -2,8 +2,7 @@ from datetime import date, datetime
 
 from fastapi import HTTPException
 
-from core import store
-from core.database import persist
+from core import repo
 from core.llm_client import explain_tax_reduction
 
 
@@ -34,29 +33,26 @@ def diagnose(conditions: dict) -> dict:
 
 
 def get_tax_info(user_id: int) -> dict:
-    info = store.tax_infos.get(user_id)
+    info = repo.get_tax_info(user_id)
     if not info:
         return {"taxType": None, "details": None}
     return {"taxType": info["tax_type"], "details": info["details"]}
 
 
 def update_tax_info(user_id: int, tax_info: dict) -> None:
-    store.tax_infos[user_id] = {
-        "id": store.tax_infos.get(user_id, {}).get("id") or store.next_id("taxinfo"),
-        "user_id": user_id,
-        "tax_type": tax_info.get("taxType") or tax_info.get("tax_type") or "부가가치세",
-        "details": tax_info.get("details", ""),
-        "updated_at": datetime.now(),
-    }
-    persist()
+    repo.upsert_tax_info(
+        user_id,
+        tax_info.get("taxType") or tax_info.get("tax_type") or "부가가치세",
+        tax_info.get("details", ""),
+    )
 
 
 EXCLUDED_INDUSTRIES = {"유흥", "부동산임대", "사행성"}
 
 
 def check_tax_reduction(user_id: int) -> dict:
-    user = store.users.get(user_id)
-    profile = store.business_profiles.get(user_id)
+    user = repo.get_user(user_id)
+    profile = repo.get_profile(user_id)
     if not user or not user.get("age") or not profile or not profile.get("founded_at"):
         raise HTTPException(
             status_code=400,
@@ -104,15 +100,7 @@ def check_tax_reduction(user_id: int) -> dict:
         else "조세특례제한법 청년창업 중소기업 세액감면 요건을 단순화한 Rule 판정입니다. 최종 판단이 아닙니다."
     )
     llm_used = bool(explained and explained.get("llmUsed"))
-    result = {
-        "eligible": eligible,
-        "reasons": reasons,
-        "legalBasis": legal_basis,
-        "judged_at": datetime.now(),
-        "llmUsed": llm_used,
-    }
-    store.tax_reduction_results[user_id] = result
-    persist()
+    repo.insert_tax_reduction(user_id, eligible, reasons, legal_basis)
     return {
         "eligible": eligible,
         "reasons": reasons,
@@ -122,12 +110,12 @@ def check_tax_reduction(user_id: int) -> dict:
 
 
 def latest_tax_reduction(user_id: int) -> dict:
-    result = store.tax_reduction_results.get(user_id)
+    result = repo.latest_tax_reduction(user_id)
     if not result:
         raise HTTPException(status_code=404, detail="판정 결과가 없습니다.")
     return {
         "eligible": result["eligible"],
-        "reasons": result["reasons"],
-        "legalBasis": result["legalBasis"],
+        "reasons": result["reasons"] or [],
+        "legalBasis": result.get("legalBasis") or result.get("legal_basis"),
         "llmUsed": bool(result.get("llmUsed")),
     }

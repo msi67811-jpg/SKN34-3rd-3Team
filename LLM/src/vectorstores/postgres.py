@@ -1,6 +1,7 @@
 import hashlib
 
 from langchain_core.embeddings import Embeddings
+from pgvector import Vector
 from pgvector.psycopg import register_vector
 from psycopg.rows import dict_row
 
@@ -29,12 +30,14 @@ class PostgresVectorSearch:
         chunks: list[RagChunk],
         *,
         force: bool = False,
+        prune_missing: bool = True,
     ) -> list[str]:
         """변경되거나 새로 추가된 Chunk만 임베딩해 pgvector에 upsert한다.
 
         Args:
             chunks: 실제 DB 원천 데이터에서 생성한 RAG Chunk 목록.
             force: True이면 기존 hash와 관계없이 모든 Chunk를 다시 임베딩한다.
+            prune_missing: 전체 원천 동기화일 때만 사라진 Chunk를 삭제한다.
 
         Returns:
             현재 원천 데이터에 존재하는 전체 Chunk ID 목록.
@@ -103,21 +106,71 @@ class PostgresVectorSearch:
                         )
                     ],
                 )
-                source_types = sorted(
-                    {chunk.get("source_type", "policy") for chunk in chunks}
-                )
-                cursor.execute(
-                    """
-                    DELETE FROM rag_documents
-                    WHERE chunk_id IS NOT NULL
-                      AND source_type = ANY(%s)
-                      AND NOT (chunk_id = ANY(%s))
-                    """,
-                    (source_types, list(chunk_hashes)),
-                )
+                if prune_missing:
+                    source_types = sorted(
+                        {chunk.get("source_type", "policy") for chunk in chunks}
+                    )
+                    cursor.execute(
+                        """
+                        DELETE FROM rag_documents
+                        WHERE chunk_id IS NOT NULL
+                          AND source_type = ANY(%s)
+                          AND NOT (chunk_id = ANY(%s))
+                        """,
+                        (source_types, list(chunk_hashes)),
+                    )
 
         self.last_embedded_count = len(changed_chunks)
         return list(chunk_hashes)
+
+    def reindex_document_ids(
+        self,
+        document_ids: list[int],
+        *,
+        force: bool = False,
+    ) -> list[int]:
+        """기존 `rag_documents.id` 행만 선택해 다른 Chunk 삭제 없이 재색인한다."""
+        requested_ids = list(dict.fromkeys(document_ids))
+        if not requested_ids:
+            return []
+        with connect_database(self._settings) as connection:
+            with connection.cursor(row_factory=dict_row) as cursor:
+                cursor.execute(
+                    """
+                    SELECT id, chunk_id, policy_id, content, source_type, source_id
+                    FROM rag_documents
+                    WHERE id = ANY(%s)
+                      AND chunk_id IS NOT NULL
+                    ORDER BY id
+                    """,
+                    (requested_ids,),
+                )
+                rows = cursor.fetchall()
+        found_ids = [int(row["id"]) for row in rows]
+        missing_ids = sorted(set(requested_ids) - set(found_ids))
+        if missing_ids:
+            raise RagDocumentNotFoundError(
+                "RAG documents not found: " + ", ".join(map(str, missing_ids))
+            )
+        chunks: list[RagChunk] = [
+            {
+                "chunk_id": str(row["chunk_id"]),
+                "policy_id": (
+                    int(row["policy_id"])
+                    if row["policy_id"] is not None
+                    else None
+                ),
+                "title": f"RAG 문서 {row['id']}",
+                "source": f"db://{row['source_type']}/{row['source_id']}",
+                "page": 1,
+                "content": str(row["content"] or ""),
+                "source_type": row["source_type"],
+                "source_id": int(row["source_id"]),
+            }
+            for row in rows
+        ]
+        self.add_chunks(chunks, force=force, prune_missing=False)
+        return found_ids
 
     def search(
         self,
@@ -144,7 +197,7 @@ class PostgresVectorSearch:
         if top_k < 1:
             raise ValueError("top_k must be at least 1")
 
-        query_embedding = self._embedding.embed_query(query)
+        query_embedding = Vector(self._embedding.embed_query(query))
         with connect_database(self._settings) as connection:
             register_vector(connection)
             with connection.cursor(row_factory=dict_row) as cursor:
@@ -166,7 +219,7 @@ class PostgresVectorSearch:
                     WHERE rd.embedding_status = 'ready'
                       AND rd.embedding IS NOT NULL
                       AND rd.chunk_id IS NOT NULL
-                      AND (%s IS NULL OR rd.policy_id = %s)
+                      AND (%s::integer IS NULL OR rd.policy_id = %s)
                     ORDER BY rd.embedding <=> %s
                     LIMIT %s
                     """,
@@ -289,6 +342,10 @@ class PostgresVectorSearch:
 def _content_hash(content: str) -> str:
     """Chunk 본문의 SHA-256 hash를 계산한다."""
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+class RagDocumentNotFoundError(LookupError):
+    """부분 재색인에서 요청한 `rag_documents.id`를 찾지 못했을 때 발생한다."""
 
 
 def _row_to_search_result(row: dict[str, object]) -> VectorSearchResult:

@@ -1,19 +1,30 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api import admin, auth, calendar, chat, expenses, notifications, policies, tax, users
 from core.config import APP_DESCRIPTION, APP_NAME, APP_VERSION, LLM_API_URL, OPENAPI_TAGS
-from core.database import db_path, init_db
+from core.db import db_path, init_db, scalar
 from core.llm_client import llm_status
 from core.postgres import postgres_status
 
-storage_mode = init_db()
+storage_mode = "pending"
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    global storage_mode
+    storage_mode = init_db()
+    yield
+
 
 app = FastAPI(
     title=APP_NAME,
     version=APP_VERSION,
     description=APP_DESCRIPTION,
     openapi_tags=OPENAPI_TAGS,
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -39,12 +50,20 @@ app.include_router(notifications.router)
 def health():
     llm = llm_status()
     postgres = postgres_status()
+    policy_count = 0
+    if storage_mode == "postgres":
+        try:
+            policy_count = int(scalar("SELECT COUNT(*) FROM policies") or 0)
+        except Exception:
+            policy_count = 0
     return {
         "status": "ok",
         "storage": storage_mode,
         "dbPath": db_path(),
         "postgres": "connected" if postgres["reachable"] else "unreachable",
         "pgvector": "ready" if postgres.get("pgvector") else "missing",
+        "ragChunks": postgres.get("ragChunks", 0),
+        "policies": policy_count,
         "llm": "connected" if llm["reachable"] else "unreachable",
         "ragReady": llm["ragReady"],
         "ports": {"backend": 8000, "llm": 8001},

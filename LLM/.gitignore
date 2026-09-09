@@ -4,3 +4,5 @@ evaluation/results/*
 !evaluation/results/.gitkeep
 *.pdf
 /work_log
+.pytest_cache/
+.*-tmp/

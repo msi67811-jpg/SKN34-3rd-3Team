@@ -1,7 +1,7 @@
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from core import store
+from core import repo
 from core.security import parse_token
 
 bearer = HTTPBearer(auto_error=False, description="로그인 응답의 accessToken을 Bearer로 넣습니다.")
@@ -17,11 +17,11 @@ def get_current_user(
         raise HTTPException(status_code=401, detail="유효하지 않은 토큰입니다.")
     role, uid = parsed
     if role == "admin":
-        admin = store.admins.get(uid)
+        admin = repo.get_admin(uid)
         if not admin:
             raise HTTPException(status_code=401, detail="관리자를 찾을 수 없습니다.")
         return {"id": uid, "role": "admin", "email": admin["email"]}
-    user = store.users.get(uid)
+    user = repo.get_user(uid)
     if not user:
         raise HTTPException(status_code=401, detail="사용자를 찾을 수 없습니다.")
     if user.get("status") == "suspended":

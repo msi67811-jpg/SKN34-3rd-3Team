@@ -2,10 +2,13 @@
 
 Backend가 LLM 서비스를 호출할 때 쓰는 내부 계약이다. `Docs/Design/API_SPEC.md`가 Frontend↔Backend용이라면, 이 문서는 `Backend↔LLM`용이다. `Docs/Design/SEQUENCE.md`의 `SVC->>LLM` 호출부와 `Docs/Design/CLASS.md`의 `LLMServiceClient`를 실제 엔드포인트 단위로 구체화한 것이다.
 
-> **초안입니다.** Backend·LLM 담당자가 함께 검토해 확정해야 하는 문서다. 타임아웃 정책은 아직 팀 합의가 없어 TBD로 남겨뒀다. (포트는 8001, 인증은 무인증으로 확정)
+> ⚠️ **폐기된 초안입니다. 계약이 아닙니다.**
+>
+> 확정 계약은 `Docs/Design/LLM_API_SPEC_V1.md`다. 이 문서가 TBD로 남겼던 공통 오류 코드와 타임아웃·재시도 정책은 V1에서 확정됐고, 구현된 엔드포인트도 V1이 정본이다. 두 문서가 충돌하면 V1을 따른다.
+>
+> 초기 설계 기록으로만 보존한다. Backend 구현 시 참고 문서는 V1과 `Docs/Design/BACKEND_LLM_INTEGRATION_HANDOFF.md`다.
 
 - **Base URL**: `http://llm:8001` — Docker 내부 네트워크에서 서비스명으로 호출, 외부에 노출하지 않는다 (`Docs/Design/ARCHITECTURE.md` §4). Backend가 `http://localhost:8000`을 쓰기로 하면서 LLM은 8001로 정리함
-  - ⚠️ **코드 반영 필요**: 현재 `feature/LLM`의 `LLM/Dockerfile`(`EXPOSE 8000`, uvicorn `--port 8000`)과 `LLM/src/core/config.py`(`Settings.port` 기본값 8000)는 아직 8000으로 남아있다. LLM 담당자가 이 문서 기준(8001)에 맞춰 코드를 고쳐야 실제로 일치한다
 - **인증**: 없음(무인증) — Docker 내부망 신뢰 기반으로 확정. 외부에 노출되지 않는 내부 통신이라 별도 인증 없이 진행한다
 - **공통 에러 응답**: `{ "error": { "code": string, "message": string } }` — 4xx/5xx 공통 형식. `Docs/Design/API_SPEC.md`에도 아직 에러 포맷이 없으니, 여기서 먼저 정하고 그쪽에도 맞추는 걸 권장한다
 - **동기/비동기**: 전부 동기 REST 호출로 시작한다 (`ARCHITECTURE.md` §4의 MVP 원칙과 동일). OCR·재색인처럼 오래 걸리는 작업은 필요해지면 별도로 재검토
@@ -71,10 +74,6 @@ Backend가 LLM 서비스를 호출할 때 쓰는 내부 계약이다. `Docs/Desi
 
 - 공통 에러 코드 목록 (지금은 형식만 정의, 실제 `code` 값 목록 없음)
 - 타임아웃·재시도 정책
-
-## 코드 반영 필요 (문서와 구현 불일치)
-
-- LLM 서비스 포트: 문서 기준 8001, 실제 `feature/LLM`의 `Dockerfile`/`config.py`는 아직 8000 — LLM 담당자 수정 필요
 
 ## 관련 문서
 

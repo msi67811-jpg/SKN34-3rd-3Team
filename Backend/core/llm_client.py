@@ -1,17 +1,21 @@
 """HTTP client for the internal LLM service. Returns None when LLM is down.
 
-LLM_API_SPEC.md 경로(/rag/*, /ocr/receipt)를 먼저 호출하고, 없으면 기존 /internal/* 로 폴백한다.
+LLM_API_SPEC_V1.md 경로(/rag/*, /ocr/receipt)를 먼저 호출하고, 없으면 기존 /internal/* 로 폴백한다.
 """
 
 from __future__ import annotations
 
 import base64
 import json
+import logging
 import uuid
 import urllib.error
 import urllib.request
 
 from core.config import LLM_API_URL, LLM_TIMEOUT_SECONDS
+
+
+logger = logging.getLogger(__name__)
 
 
 def llm_status() -> dict:
@@ -93,13 +97,16 @@ def explain_expense(
     amount: int,
     items: list[str] | None = None,
 ) -> dict | None:
+    normalized_category = (category or "").strip() or "미분류"
+    normalized_vendor = (vendor or "").strip() or "상호 미상"
+    normalized_items = [item.strip() for item in items or [] if item.strip()]
     spec = _post(
         "/rag/deductibility",
         {
-            "category": category,
+            "category": normalized_category,
             "amount": amount,
-            "vendor": vendor,
-            "items": items or [],
+            "vendor": normalized_vendor,
+            "items": normalized_items,
         },
     )
     if spec and spec.get("basis"):
@@ -110,22 +117,27 @@ def explain_expense(
             "sources": [],
         }
     return rag_answer(
-        f"[expense] 사업 경비 인정 가능성. 카테고리 {category}, 상호 {vendor}, 금액 {amount}원. "
+        f"[expense] 사업 경비 인정 가능성. 카테고리 {normalized_category}, "
+        f"상호 {normalized_vendor}, 금액 {amount}원. "
         "세법상 참고 근거를 짧게 설명하고 최종 인정은 세무서·세무사 확인이 필요하다고 고지하라.",
         category="expense",
     )
 
 
 def summarize_announcement(raw_content: str, source: str | None = None) -> dict | None:
+    normalized_content = (raw_content or "").strip()
+    if not normalized_content:
+        logger.info("Skipping LLM announcement summary because content is blank")
+        return None
     spec = _post(
         "/rag/summarize-announcement",
-        {"rawContent": raw_content, "source": source or ""},
+        {"rawContent": normalized_content, "source": source or ""},
     )
     if spec:
         return spec
     return _post(
         "/internal/summarize/announcement",
-        {"rawContent": raw_content, "source": source or ""},
+        {"rawContent": normalized_content, "source": source or ""},
     )
 
 
@@ -188,7 +200,11 @@ def _post_multipart(
         with urllib.request.urlopen(req, timeout=timeout) as res:
             payload = res.read().decode("utf-8")
             return json.loads(payload) if payload else {}
-    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, json.JSONDecodeError, OSError):
+    except urllib.error.HTTPError as exc:
+        _log_http_error("POST", path, exc)
+        return None
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError) as exc:
+        _log_transport_error("POST", path, exc)
         return None
 
 
@@ -209,5 +225,46 @@ def _request(
         with urllib.request.urlopen(req, timeout=timeout or LLM_TIMEOUT_SECONDS) as res:
             raw = res.read().decode("utf-8")
             return json.loads(raw) if raw else {}
-    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, json.JSONDecodeError, OSError):
+    except urllib.error.HTTPError as exc:
+        _log_http_error(method, path, exc)
         return None
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError) as exc:
+        _log_transport_error(method, path, exc)
+        return None
+
+
+def _log_http_error(
+    method: str,
+    path: str,
+    exc: urllib.error.HTTPError,
+) -> None:
+    """LLM 오류 응답에서 비민감 코드만 추출해 기록한다."""
+    error_code = "HTTP_ERROR"
+    retryable = exc.code >= 500
+    try:
+        raw = exc.read().decode("utf-8")
+        payload = json.loads(raw) if raw else {}
+        error = payload.get("error") if isinstance(payload, dict) else None
+        if isinstance(error, dict):
+            error_code = str(error.get("code") or error_code)
+            retryable = bool(error.get("retryable", retryable))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        pass
+    logger.warning(
+        "LLM HTTP error: method=%s path=%s status=%s code=%s retryable=%s",
+        method,
+        path,
+        exc.code,
+        error_code,
+        retryable,
+    )
+
+
+def _log_transport_error(method: str, path: str, exc: Exception) -> None:
+    """URL·요청 본문·자격증명을 제외하고 전송 오류 종류만 기록한다."""
+    logger.warning(
+        "LLM transport error: method=%s path=%s type=%s",
+        method,
+        path,
+        type(exc).__name__,
+    )

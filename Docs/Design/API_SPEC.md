@@ -36,7 +36,9 @@
 
 | Method | Endpoint | 설명 | 인증 | Request | Response | 관련 기능ID |
 | --- | --- | --- | --- | --- | --- | --- |
-| GET | /calendar | 홈 화면 통합 일정 캘린더 조회(세금+지원금) | 필요 | `?year&month&type`(tax,policy 선택) | `{ events: [...] }` | FS-11 |
+| GET | /calendar | 홈 화면 통합 일정 캘린더 조회(세금+지원금+내 일정) | 필요 | `?year&month&type`(tax,policy,user 선택) | `{ events: [...] }` | FS-11 |
+| POST | /calendar | 내 일정 등록(`eventType=USER`) | 필요 | `{ title, dueDate, description, remind, notifyAt }` | `{ event }` | FS-11 |
+| DELETE | /calendar/{eventId} | 내 일정 삭제 | 필요 | - | `{ deleted: true }` | FS-11 |
 
 ## tax — 세무 관리
 
@@ -72,6 +74,17 @@
 | GET | /announcements/{announcementId}/summary | 공고문 AI 요약 조회 | 필요 | - | `{ target, benefit, period, documents, notes, source }` | FS-22 |
 | POST | /policies/{policyId}/save | 관심 정책 저장 | 필요 | - | `{ saved: true }` | FS-23 |
 | GET | /policies/saved | 저장한 정책 목록 조회 | 필요 | - | `{ policies: [...] }` | FS-23 |
+
+## notifications — 알림
+
+설계 초안에는 없던 그룹이다. 구현(`Backend/api/notifications.py`)을 정식 수용해 기록한다.
+
+| Method | Endpoint | 설명 | 인증 | Request | Response | 관련 기능ID |
+| --- | --- | --- | --- | --- | --- | --- |
+| GET | /notifications | 알림·메일함 조회 | 필요 | - | `{ notifications: [...] }` | FS-12 |
+| POST | /notifications/{notificationId}/read | 알림 하나 읽음 처리 | 필요 | - | `{ read: true }` | FS-12 |
+| POST | /notifications/read-all | 모든 알림 읽음 처리 | 필요 | - | `{ read: n }` | FS-12 |
+| POST | /notifications/push | 브라우저·메일 알림 즉시 발송 | 필요 | `{ ... }` | `{ sent: true }` | FS-12 |
 
 ## admin — 관리자
 

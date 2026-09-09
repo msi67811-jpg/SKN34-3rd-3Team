@@ -24,7 +24,7 @@ flowchart LR
 ```
 
 - **Frontend → Backend**: 외부에 노출되는 유일한 진입점. `Docs/API_SPEC.md`의 엔드포인트를 Backend가 REST로 제공한다.
-- **Backend → LLM**: LLM 서비스는 외부에 직접 노출하지 않고, Backend가 Docker 내부 네트워크에서 서비스명으로 호출한다(예: `http://llm:8000/...`). RAG 질의응답, 세액감면판정 근거 생성, 공고문 요약, 영수증 OCR 등 AI 작업을 담당한다.
+- **Backend → LLM**: LLM 서비스는 외부에 직접 노출하지 않고, Backend가 Docker 내부 네트워크에서 서비스명으로 호출한다(예: `http://llm:8001/...`). RAG 질의응답, 세액감면판정 근거 생성, 공고문 요약, 영수증 OCR 등 AI 작업을 담당한다.
 - **DB**: 관계형 데이터(`Docs/ERD.md`)와 벡터 데이터를 Postgres + pgvector로 통합해 컨테이너 하나로 관리한다. Backend와 LLM이 각자 필요한 부분(일반 데이터/벡터 검색)에 직접 접속한다.
 - **외부 시스템**: 국세청·정부24·온통청년 등에서 받아온 세법·정책 원문은 관리자 기능(FS-26)을 통해 Backend로 적재된다.
 

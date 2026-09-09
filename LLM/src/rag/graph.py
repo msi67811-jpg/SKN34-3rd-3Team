@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from src.core.config import Settings, get_settings
 from src.data.contracts import UserProfile, VectorSearchResult
+from src.data.tax_normalization import extract_legal_ratios
 from src.models import get_llm
 from src.rag.answer import (
     AnswerStatus,
@@ -23,11 +24,16 @@ from src.rag.answer import (
 )
 from src.rag.contracts import EligibilityDecision
 from src.rag.discovery import build_personalized_query
+from src.rag.guardrails import is_question_in_scope
 from src.rag.reranker import CohereRerankError, rerank_documents
 from src.rag.tax import (
+    TaxCalculationError,
+    TaxCalculationPlan,
     TaxEvidenceDecision,
     TaxNextQuery,
+    calculate_tax_plan,
     evaluate_tax_evidence,
+    generate_tax_calculation_plan,
     generate_tax_next_query,
     merge_evidence,
     resolve_legal_reference,
@@ -54,6 +60,7 @@ class GraphState(TypedDict):
     """LangGraph 전체 단계에서 공유할 최소 상태."""
 
     query: Required[str]
+    category: NotRequired[str | None]
     policy_id: NotRequired[int | None]
     top_k: NotRequired[int | None]
     decision: NotRequired[EligibilityDecision | None]
@@ -70,14 +77,22 @@ class GraphState(TypedDict):
     notice_backend_available: NotRequired[bool]
     calculation_result: NotRequired[dict[str, object] | None]
     calculation_required: NotRequired[bool]
-    calculator_unavailable: NotRequired[bool]
     missing_information: NotRequired[list[str]]
     missing_user_context: NotRequired[list[str]]
     last_retrieval_count: NotRequired[int]
+    normalized_ratios: NotRequired[list[dict[str, object]]]
     termination_reason: NotRequired[str | None]
     answer_status: NotRequired[AnswerStatus | None]
     cited_source_numbers: NotRequired[list[int]]
     answer_sources: NotRequired[list[dict[str, object]]]
+    guardrail_reason: NotRequired[
+        Literal[
+            "out_of_scope",
+            "insufficient_evidence",
+            "generation_validation_failed",
+        ]
+        | None
+    ]
     answer: NotRequired[str | None]
 
 
@@ -88,7 +103,7 @@ Rerank = Callable[
 ]
 TaxEvidenceEvaluator = Callable[[GraphState], Awaitable[TaxEvidenceDecision]]
 TaxNextQueryGenerator = Callable[[GraphState], Awaitable[TaxNextQuery]]
-TaxCalculator = Callable[[GraphState], dict[str, object]]
+TaxCalculationPlanner = Callable[[GraphState], Awaitable[TaxCalculationPlan]]
 
 
 ROUTER_PROMPT = ChatPromptTemplate.from_messages(
@@ -101,7 +116,7 @@ ROUTER_PROMPT = ChatPromptTemplate.from_messages(
             "사용자 개인정보나 사업정보가 필요한 판정 질문이면 personalized를 "
             "true로 반환하세요.",
         ),
-        ("human", "{query}"),
+        ("human", "Backend category: {category}\n질문: {query}"),
     ]
 )
 
@@ -122,14 +137,15 @@ def initialize_state(state: GraphState) -> dict[str, object]:
         "notice_backend_available": False,
         "calculation_result": None,
         "calculation_required": False,
-        "calculator_unavailable": False,
         "missing_information": [],
         "missing_user_context": [],
         "last_retrieval_count": 0,
+        "normalized_ratios": [],
         "termination_reason": None,
         "answer_status": None,
         "cited_source_numbers": [],
         "answer_sources": [],
+        "guardrail_reason": None,
         "answer": None,
     }
 
@@ -143,7 +159,7 @@ async def route_question(
     router_chain = ROUTER_PROMPT | llm.with_structured_output(RouteDecision)
     decision = RouteDecision.model_validate(
         await router_chain.ainvoke(
-            {"query": state["query"]},
+            {"query": state["query"], "category": state.get("category")},
             config={"run_name": "langgraph_question_router"},
         )
     )
@@ -152,14 +168,37 @@ async def route_question(
         decision.route,
         decision.personalized,
     )
+    resolved_route = _route_for_category(state.get("category"), decision.route)
     return {
-        "route": decision.route,
+        "route": resolved_route,
         "personalized": decision.personalized,
     }
 
 
-def _select_route(state: GraphState) -> Route:
+def _route_for_category(category: str | None, proposed_route: Route) -> Route:
+    """Frontend 카테고리에서 허용되지 않는 LLM route를 결정적으로 보정한다."""
+    if category in {"tax", "expense"}:
+        return "tax"
+    if category == "saving":
+        return proposed_route if proposed_route in {"tax", "policy"} else "tax"
+    if category == "policy":
+        return proposed_route if proposed_route in {"policy", "notice"} else "policy"
+    return proposed_route
+
+
+def _default_route_for_category(category: str | None) -> Route:
+    """Guardrail 조기 종료 응답에 사용할 안정적인 route를 반환한다."""
+    if category in {"tax", "expense", "saving"}:
+        return "tax"
+    return "policy"
+
+
+def _select_route(
+    state: GraphState,
+) -> Literal["policy", "notice", "tax", "answer"]:
     """Router 결과를 conditional edge의 branch 이름으로 반환한다."""
+    if state.get("guardrail_reason") == "out_of_scope":
+        return "answer"
     route = state.get("route")
     if route is None:
         raise ValueError("Router did not set a route")
@@ -175,7 +214,7 @@ def build_graph(
     rerank: Rerank | None = None,
     tax_evidence_evaluator: TaxEvidenceEvaluator | None = None,
     tax_next_query_generator: TaxNextQueryGenerator | None = None,
-    tax_calculator: TaxCalculator | None = None,
+    tax_calculation_planner: TaxCalculationPlanner | None = None,
     settings: Settings | None = None,
 ) -> CompiledStateGraph:
     """Structured Router와 Policy·Notice·Tax branch를 조립한다."""
@@ -205,6 +244,7 @@ def build_graph(
             query=state["query"],
             documents=state.get("reranked_docs", []),
             user_context=state.get("user_context"),
+            normalized_ratios=state.get("normalized_ratios", []),
         )
 
     async def configured_next_query_generator(state: GraphState) -> TaxNextQuery:
@@ -217,10 +257,32 @@ def build_graph(
             search_history=state.get("search_history", []),
         )
 
+    async def configured_calculation_planner(
+        state: GraphState,
+    ) -> TaxCalculationPlan:
+        return await generate_tax_calculation_plan(
+            router_llm,
+            query=state["query"],
+            documents=state.get("reranked_docs", []),
+            user_context=state.get("user_context"),
+        )
+
     evidence_evaluator = tax_evidence_evaluator or configured_evidence_evaluator
     next_query_generator = tax_next_query_generator or configured_next_query_generator
+    calculation_planner = tax_calculation_planner or configured_calculation_planner
 
     async def router_node(state: GraphState) -> dict[str, object]:
+        if not is_question_in_scope(
+            state["query"],
+            allowed_keywords=settings_config.allowed_rag_keywords,
+            blocked_keywords=settings_config.blocked_rag_keywords,
+        ):
+            return {
+                "route": _default_route_for_category(state.get("category")),
+                "personalized": False,
+                "termination_reason": "out_of_scope",
+                "guardrail_reason": "out_of_scope",
+            }
         return await route_question(state, llm=router_llm)
 
     async def policy_node(state: GraphState) -> dict[str, object]:
@@ -437,6 +499,17 @@ def build_graph(
             "termination_reason": termination_reason,
         }
 
+    def tax_ratio_normalization_node(state: GraphState) -> dict[str, object]:
+        """누적 Tax 근거의 법령 비율을 원문 변경 없이 구조화한다."""
+        normalized_ratios: list[dict[str, object]] = []
+        for document in state.get("reranked_docs", []):
+            for ratio in extract_legal_ratios(document["content"]):
+                normalized_ratios.append(
+                    {"chunk_id": document["chunk_id"], **ratio}
+                )
+        logger.info("Tax normalized ratio count=%d", len(normalized_ratios))
+        return {"normalized_ratios": normalized_ratios}
+
     async def tax_next_query_node(state: GraphState) -> dict[str, object]:
         """명시적 법령 참조를 우선하고 필요할 때만 LLM Query를 생성한다."""
         next_query = resolve_legal_reference(
@@ -460,31 +533,56 @@ def build_graph(
         return {"search_query": next_query.strip(), "termination_reason": None}
 
     async def tax_calculation_node(state: GraphState) -> dict[str, object]:
-        """필요할 때만 Backend Calculator boundary를 호출하고 종료 상태를 만든다."""
-        if state.get("calculation_required"):
-            if tax_calculator is None:
-                logger.info("Tax calculator available=false")
-                return {
-                    "calculator_unavailable": True,
-                    "termination_reason": "calculator_unavailable",
-                }
-            try:
-                logger.info("Tax calculator available=true")
-                calculation_result = await asyncio.to_thread(tax_calculator, state)
-            except Exception:
-                logger.exception("Backend tax calculator failed")
-                return {
-                    "calculator_unavailable": True,
-                    "termination_reason": "calculator_error",
-                }
+        """근거에서 계산 계획을 추출하고 Decimal로 결정적 산술만 수행한다."""
+        if not (
+            state.get("evidence_sufficient") is True
+            and state.get("calculation_required") is True
+        ):
+            return {}
+        try:
+            plan = await calculation_planner(state)
+        except Exception:
+            logger.exception("Tax calculation plan generation failed")
+            return {"termination_reason": "calculation_plan_error"}
+
+        missing_inputs = list(plan.missing_inputs)
+        if plan.base_amount is None and "기준 금액" not in missing_inputs:
+            missing_inputs.append("기준 금액")
+        if plan.rate_percent is None and "적용 비율" not in missing_inputs:
+            missing_inputs.append("적용 비율")
+        if missing_inputs:
             return {
-                "calculation_result": calculation_result,
-                "termination_reason": "calculation_complete",
+                "missing_user_context": missing_inputs,
+                "termination_reason": "missing_calculation_input",
             }
-        return {}
+        try:
+            calculation_result = calculate_tax_plan(
+                plan,
+                documents=state.get("reranked_docs", []),
+            )
+        except TaxCalculationError:
+            logger.warning("Tax calculation evidence validation failed", exc_info=True)
+            return {
+                "evidence_sufficient": False,
+                "termination_reason": "calculation_evidence_error",
+            }
+        logger.info(
+            "Tax deterministic calculation complete: type=%s",
+            plan.calculation_type,
+        )
+        return {
+            "calculation_result": calculation_result,
+            "termination_reason": "calculation_complete",
+        }
 
     async def answer_node(state: GraphState) -> dict[str, object]:
         """각 branch 결과만 사용해 공통 Structured Answer를 생성한다."""
+        if state.get("guardrail_reason") == "out_of_scope":
+            result = UnifiedAnswerResult(
+                answer=settings_config.out_of_scope_answer,
+                status="no_result",
+            )
+            return _answer_update(result, [])
         route = state.get("route")
         if route is None:
             result = fallback_answer("error")
@@ -535,11 +633,15 @@ def build_graph(
         )
         return _answer_update(result, cited_sources)
 
-    def route_after_tax_evidence(state: GraphState) -> Literal["continue", "finish"]:
-        return "finish" if state.get("termination_reason") else "continue"
+    def route_after_tax_evidence(
+        state: GraphState,
+    ) -> Literal["continue", "answer", "calculate"]:
+        if state.get("evidence_sufficient") is True:
+            return "calculate" if state.get("calculation_required") is True else "answer"
+        return "answer" if state.get("termination_reason") else "continue"
 
-    def route_after_tax_next_query(state: GraphState) -> Literal["retry", "finish"]:
-        return "finish" if state.get("termination_reason") else "retry"
+    def route_after_tax_next_query(state: GraphState) -> Literal["retry", "answer"]:
+        return "answer" if state.get("termination_reason") else "retry"
 
     graph = StateGraph(GraphState)
     graph.add_node("initialize", initialize_state)
@@ -547,6 +649,7 @@ def build_graph(
     graph.add_node("policy_node", policy_node)
     graph.add_node("notice_node", notice_node)
     graph.add_node("tax_retrieval", tax_retrieval_node)
+    graph.add_node("tax_ratio_normalization", tax_ratio_normalization_node)
     graph.add_node("tax_evidence", tax_evidence_node)
     graph.add_node("tax_next_query", tax_next_query_node)
     graph.add_node("tax_calculation", tax_calculation_node)
@@ -561,20 +664,26 @@ def build_graph(
             "policy": "policy_node",
             "notice": "notice_node",
             "tax": "tax_retrieval",
+            "answer": "answer",
         },
     )
     graph.add_edge("policy_node", "answer")
     graph.add_edge("notice_node", "answer")
-    graph.add_edge("tax_retrieval", "tax_evidence")
+    graph.add_edge("tax_retrieval", "tax_ratio_normalization")
+    graph.add_edge("tax_ratio_normalization", "tax_evidence")
     graph.add_conditional_edges(
         "tax_evidence",
         route_after_tax_evidence,
-        {"continue": "tax_next_query", "finish": "tax_calculation"},
+        {
+            "continue": "tax_next_query",
+            "answer": "answer",
+            "calculate": "tax_calculation",
+        },
     )
     graph.add_conditional_edges(
         "tax_next_query",
         route_after_tax_next_query,
-        {"retry": "tax_retrieval", "finish": "tax_calculation"},
+        {"retry": "tax_retrieval", "answer": "answer"},
     )
     graph.add_edge("tax_calculation", "answer")
     graph.add_edge("answer", END)
@@ -589,10 +698,9 @@ def _answer_status(state: GraphState) -> AnswerStatus:
         "policy_retriever_unavailable",
         "notice_integration_unavailable",
         "tax_retriever_unavailable",
-        "calculator_unavailable",
     }:
         return "integration_unavailable"
-    if reason == "missing_user_context":
+    if reason in {"missing_user_context", "missing_calculation_input"}:
         return "need_more_info"
     if reason == "no_result":
         return "no_result"
@@ -601,9 +709,11 @@ def _answer_status(state: GraphState) -> AnswerStatus:
         "notice_backend_error",
         "evidence_error",
         "next_query_error",
-        "calculator_error",
+        "calculation_plan_error",
     }:
         return "error"
+    if reason == "calculation_evidence_error":
+        return "insufficient_evidence"
     if route == "tax" and not state.get("reranked_docs"):
         return "no_result"
     if route == "tax" and not state.get("evidence_sufficient"):
@@ -664,6 +774,7 @@ def _answer_context(state: GraphState) -> dict[str, object]:
         }
     return {
         "evidence": _answer_source_records(state),
+        "normalized_ratios": state.get("normalized_ratios", []),
         "evidence_sufficient": state.get("evidence_sufficient"),
         "missing_information": state.get("missing_information", []),
         "missing_user_context": state.get("missing_user_context", []),
@@ -671,7 +782,6 @@ def _answer_context(state: GraphState) -> dict[str, object]:
         "termination_reason": state.get("termination_reason"),
         "calculation_required": state.get("calculation_required", False),
         "calculation_result": state.get("calculation_result"),
-        "calculator_available": not state.get("calculator_unavailable", False),
     }
 
 

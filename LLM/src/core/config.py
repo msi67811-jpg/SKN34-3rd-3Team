@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     app_name: str = "policy-rag-llm"
     app_env: str = "local"
     host: str = "0.0.0.0"
-    port: int = 8000
+    port: int = 8001
     reload: bool = False
     log_level: str = "INFO"
     cors_origins: str = "http://localhost:5173"
