@@ -11,7 +11,7 @@ from core.config import DATABASE_URL
 from core import store
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-SCHEMA_SQL = PROJECT_ROOT / "DB" / "schema.sql"
+SCHEMA_SQL = PROJECT_ROOT / "DB" / "01_schema.sql"
 EXTRAS_SQL = PROJECT_ROOT / "DB" / "app_extras.sql"
 
 

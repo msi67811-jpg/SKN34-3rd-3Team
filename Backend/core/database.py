@@ -1,4 +1,4 @@
-"""SQLite persistence for the in-memory store. Schema follows DB/schema.sql (no pgvector)."""
+"""SQLite persistence for the in-memory store. Schema follows DB/01_schema.sql (no pgvector)."""
 
 from __future__ import annotations
 
