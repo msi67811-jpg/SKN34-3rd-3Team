@@ -160,10 +160,6 @@ CREATE TABLE IF NOT EXISTS tax_documents (
     source TEXT,
     created_at TEXT
 );
-CREATE TABLE IF NOT EXISTS meta_ids (
-    name TEXT PRIMARY KEY,
-    value INTEGER
-);
 CREATE TABLE IF NOT EXISTS notifications (
     id INTEGER PRIMARY KEY,
     user_id INTEGER,
@@ -281,7 +277,6 @@ def _clear(conn: sqlite3.Connection) -> None:
         "users",
         "admin_users",
         "notifications",
-        "meta_ids",
     ]
     for table in tables:
         conn.execute(f"DELETE FROM {table}")
@@ -493,8 +488,6 @@ def _save(conn: sqlite3.Connection) -> None:
                 _iso(row.get("created_at")),
             ),
         )
-    for name, value in store._next_ids.items():
-        conn.execute("INSERT INTO meta_ids(name,value) VALUES (?,?)", (name, value))
     conn.commit()
 
 
@@ -519,7 +512,6 @@ def _load(conn: sqlite3.Connection) -> None:
     store.announcement_summaries.clear()
     store.calendar_events.clear()
     store.notifications.clear()
-    store._next_ids.clear()
 
     for row in conn.execute("SELECT * FROM admin_users"):
         item = dict(row)
@@ -636,5 +628,4 @@ def _load(conn: sqlite3.Connection) -> None:
         item["created_at"] = _parse_dt(item.get("created_at"))
         item["read"] = bool(item.get("read_flag"))
         store.notifications[item["id"]] = item
-    for row in conn.execute("SELECT * FROM meta_ids"):
-        store._next_ids[row["name"]] = row["value"]
+    store.sync_next_ids()

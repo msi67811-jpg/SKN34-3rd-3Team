@@ -172,7 +172,6 @@ def save_postgres(conn) -> None:
         "business_profiles",
         "users",
         "admin_users",
-        "meta_ids",
     ]
     with conn.cursor() as cur:
         cur.execute("TRUNCATE " + ", ".join(tables) + " RESTART IDENTITY CASCADE")
@@ -379,8 +378,6 @@ def save_postgres(conn) -> None:
                     row.get("created_at"),
                 ),
             )
-        for name, value in store._next_ids.items():
-            cur.execute("INSERT INTO meta_ids(name,value) VALUES (%s,%s)", (name, value))
 
 
 def load_postgres(conn) -> None:
@@ -406,7 +403,6 @@ def load_postgres(conn) -> None:
     store.announcement_summaries.clear()
     store.calendar_events.clear()
     store.notifications.clear()
-    store._next_ids.clear()
 
     with conn.cursor(row_factory=dict_row) as cur:
         for item in cur.execute("SELECT * FROM admin_users"):
@@ -477,5 +473,4 @@ def load_postgres(conn) -> None:
             row = dict(item)
             row["read"] = bool(row.get("read_flag"))
             store.notifications[row["id"]] = row
-        for item in cur.execute("SELECT * FROM meta_ids"):
-            store._next_ids[item["name"]] = item["value"]
+    store.sync_next_ids()

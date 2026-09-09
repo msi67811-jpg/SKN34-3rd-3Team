@@ -11,6 +11,49 @@ def next_id(name: str) -> int:
     return _next_ids[name]
 
 
+def sync_next_ids() -> None:
+    """Persisted rows에서 ID 시퀀스를 복원한다 (meta_ids 테이블 없이)."""
+    _next_ids.clear()
+
+    def bump(name: str, value: int | None) -> None:
+        if value is None:
+            return
+        _next_ids[name] = max(_next_ids.get(name, 0), int(value))
+
+    for row in admins.values():
+        bump("admin", row.get("id"))
+    for row in users.values():
+        bump("user", row.get("id"))
+    for row in business_profiles.values():
+        bump("biz", row.get("id"))
+    for row in tax_infos.values():
+        bump("taxinfo", row.get("id"))
+    for row in chat_messages.values():
+        bump("chat", row.get("id"))
+    for row in reminders.values():
+        bump("reminder", row.get("id"))
+    for row in calendar_events.values():
+        bump("event", row.get("id"))
+    for row in receipts.values():
+        bump("receipt", row.get("id"))
+    for row in receipt_extractions.values():
+        bump("extract", row.get("id"))
+    for row in expenses.values():
+        bump("expense", row.get("id"))
+    for row in saved_policies.values():
+        bump("saved", row.get("id"))
+    for row in announcement_summaries.values():
+        bump("summary", row.get("id"))
+    for row in tax_documents.values():
+        bump("taxdoc", row.get("id"))
+    for row in policies.values():
+        bump("policy", row.get("id"))
+    for row in announcements.values():
+        bump("announcement", row.get("id"))
+    for row in notifications.values():
+        bump("notification", row.get("id"))
+
+
 users: dict[int, dict] = {}
 users_by_email: dict[str, int] = {}
 admins: dict[int, dict] = {}
